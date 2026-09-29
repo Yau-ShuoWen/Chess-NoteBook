@@ -42,6 +42,7 @@ private fun ChessEditor() {
     var setupBoard by remember { mutableStateOf(game.position.board) }
     var setupPiece by remember { mutableStateOf<Piece?>(Piece(Color.WHITE, PieceType.PAWN)) }
     var setupTurn by remember { mutableStateOf(Color.WHITE) }
+    var setupError by remember { mutableStateOf<String?>(null) }
     var boardFlipped by remember { mutableStateOf(false) }
     val position = remember(revision) { game.position }
     val legalTargets = selected?.let { game.legalMoves(it).map(Move::to).toSet() } ?: emptySet()
@@ -58,16 +59,22 @@ private fun ChessEditor() {
                 Row {
                     TextButton(onClick = { boardFlipped = !boardFlipped; selected = null }) { Text("翻转") }
                     TextButton(onClick = {
-                        if (setupMode) { game.replacePosition(setupBoard, setupTurn); revision++ }
-                        else { setupBoard = position.board; setupTurn = position.turn }
-                        selected = null; setupMode = !setupMode
+                        if (setupMode) {
+                            val validation = ChessRules.validateSetup(setupBoard)
+                            if (validation.isValid) {
+                                game.replacePosition(setupBoard, setupTurn); revision++; setupMode = false; setupError = null
+                            } else setupError = validation.errors.joinToString("\n")
+                        } else {
+                            setupBoard = position.board; setupTurn = position.turn; setupMode = true; setupError = null
+                        }
+                        selected = null
                     }) { Text(if (setupMode) "完成摆放" else "摆放棋子") }
                     TextButton(onClick = { game.reset(); setupBoard = game.position.board; selected = null; setupMode = false; revision++ }) { Text("新对局") }
                 }
             }
             ChessBoard(if (setupMode) position.copy(board = setupBoard) else position, selected,
                 if (setupMode) emptySet() else legalTargets, if (setupMode) emptySet() else forbiddenTargets, boardFlipped) { square ->
-                if (setupMode) setupBoard = setupBoard.toMutableMap().apply { if (setupPiece == null) remove(square) else put(square, setupPiece!!) }
+                if (setupMode) { setupBoard = setupBoard.toMutableMap().apply { if (setupPiece == null) remove(square) else put(square, setupPiece!!) }; setupError = null }
                 else {
                     val piece = position.board[square]
                     if (selected == square) selected = null
@@ -81,7 +88,11 @@ private fun ChessEditor() {
                     }
                 }
             }
-            if (setupMode) SetupControls(setupPiece, setupTurn, { setupPiece = it }, { setupTurn = it }, { setupBoard = emptyMap() }, { setupBoard = Position.initial().board })
+            if (setupMode) {
+                setupError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) }
+                SetupControls(setupPiece, setupTurn, { setupPiece = it }, { setupTurn = it },
+                    { setupBoard = emptyMap(); setupError = null }, { setupBoard = Position.initial().board; setupError = null })
+            }
             else MoveHistory(history) { ply -> game.goTo(ply); selected = null; revision++ }
             Spacer(Modifier.weight(1f))
             Text("点选棋子，再点目标格。棋谱会自动记录。", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))

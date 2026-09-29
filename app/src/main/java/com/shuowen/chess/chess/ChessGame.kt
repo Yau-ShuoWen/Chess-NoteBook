@@ -23,6 +23,7 @@ data class Position(val board: Map<Square, Piece>, val turn: Color = Color.WHITE
     }
 }
 data class PlayedMove(val move: Move, val notation: String, val position: Position)
+data class SetupValidation(val errors: List<String>) { val isValid get() = errors.isEmpty() }
 
 class ChessGame(start: Position = Position.initial()) {
     var position = start; private set
@@ -77,6 +78,43 @@ object ChessRules {
     fun isInCheck(position: Position, color: Color): Boolean = position.board.entries.firstOrNull { it.value == Piece(color, PieceType.KING) }?.key?.let { isAttacked(position, it, color.opposite()) } ?: false
     fun isCheckmate(position: Position) = isInCheck(position, position.turn) && legalMoves(position).isEmpty()
     fun isStalemate(position: Position) = !isInCheck(position, position.turn) && legalMoves(position).isEmpty()
+
+    fun validateSetup(board: Map<Square, Piece>): SetupValidation {
+        val errors = mutableListOf<String>()
+        for (color in Color.entries) {
+            val sideName = if (color == Color.WHITE) "白方" else "黑方"
+            val pieces = board.filterValues { it.color == color }
+            val kings = pieces.values.count { it.type == PieceType.KING }
+            val pawns = pieces.values.count { it.type == PieceType.PAWN }
+            if (kings != 1) errors += "${sideName}必须有且只能有一个王"
+            if (pawns > 8) errors += "${sideName}最多只能有八个兵"
+            if (pieces.size > 16) errors += "${sideName}棋子总数不能超过十六个"
+            if (pieces.any { (square, piece) -> piece.type == PieceType.PAWN && square.rank in listOf(0, 7) })
+                errors += "${sideName}的兵不能放在第一或第八横线"
+
+            val missingPawns = 8 - pawns.coerceAtMost(8)
+            val queens = pieces.values.count { it.type == PieceType.QUEEN }
+            val rooks = pieces.values.count { it.type == PieceType.ROOK }
+            val knights = pieces.values.count { it.type == PieceType.KNIGHT }
+            val bishopsBySquareColor = pieces.filterValues { it.type == PieceType.BISHOP }.keys.groupingBy { (it.file + it.rank) % 2 }.eachCount()
+            val requiredPromotions = (queens - 1).coerceAtLeast(0) + (rooks - 2).coerceAtLeast(0) +
+                (knights - 2).coerceAtLeast(0) + ((bishopsBySquareColor[0] ?: 0) - 1).coerceAtLeast(0) +
+                ((bishopsBySquareColor[1] ?: 0) - 1).coerceAtLeast(0)
+            if (requiredPromotions > missingPawns)
+                errors += "${sideName}的后、车、马或同色格象数量过多，缺少的兵不足以升变得到这些棋子"
+        }
+
+        val whiteKing = board.entries.singleOrNull { it.value == Piece(Color.WHITE, PieceType.KING) }?.key
+        val blackKing = board.entries.singleOrNull { it.value == Piece(Color.BLACK, PieceType.KING) }?.key
+        if (whiteKing != null && blackKing != null) {
+            if (kotlin.math.abs(whiteKing.file - blackKing.file) <= 1 && kotlin.math.abs(whiteKing.rank - blackKing.rank) <= 1)
+                errors += "两个王不能相邻"
+            val position = Position(board, castling = CastlingRights(false, false, false, false))
+            if (isInCheck(position, Color.WHITE)) errors += "白王不能处于被攻击状态"
+            if (isInCheck(position, Color.BLACK)) errors += "黑王不能处于被攻击状态"
+        }
+        return SetupValidation(errors.distinct())
+    }
 
     fun san(position: Position, move: Move): String {
         val piece = position.board.getValue(move.from); val captured = position.board[move.to] != null || move.isEnPassant
