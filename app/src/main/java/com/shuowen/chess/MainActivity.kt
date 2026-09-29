@@ -102,9 +102,14 @@ private fun ChessBoard(position: Position, selected: Square?, legalTargets: Set<
             for (file in files) { val square = Square(file, rank); val color = when {
                 square == selected -> UiColor(0xFFE5C65C)
                 (file + rank) % 2 == 0 -> UiColor(0xFFF0D9B5); else -> UiColor(0xFFB58863) }
-                Box(Modifier.weight(1f).fillMaxHeight().background(color).clickable { onSquare(square) }, contentAlignment = Alignment.Center) {
+                val isCapture = square in legalTargets && position.board[square] != null
+                val displayColor = if (isCapture) when {
+                    (file + rank) % 2 == 0 -> UiColor(0xFFC3A77E)
+                    else -> UiColor(0xFF815D45)
+                } else color
+                Box(Modifier.weight(1f).fillMaxHeight().background(displayColor).clickable { onSquare(square) }, contentAlignment = Alignment.Center) {
                     position.board[square]?.let { Text(pieceGlyph(it), fontSize = 34.sp) }
-                    if (square in legalTargets) Box(Modifier.size(12.dp).background(UiColor(0x99606060), CircleShape))
+                    if (square in legalTargets && !isCapture) Box(Modifier.size(12.dp).background(UiColor(0x99606060), CircleShape))
                     else if (square in forbiddenTargets) Text("×", color = UiColor(0xFF555555), fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 }
             }

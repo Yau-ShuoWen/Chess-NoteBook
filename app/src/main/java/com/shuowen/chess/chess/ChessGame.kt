@@ -28,8 +28,10 @@ class ChessGame(start: Position = Position.initial()) {
     var position = start; private set
     private val timeline = mutableListOf(start)
     private val moves = mutableListOf<PlayedMove>()
+    var currentPly = 0
+        private set
     val history: List<PlayedMove> get() = moves
-    fun reset(position: Position = Position.initial()) { this.position = position; timeline.clear(); timeline += position; moves.clear() }
+    fun reset(position: Position = Position.initial()) { this.position = position; timeline.clear(); timeline += position; moves.clear(); currentPly = 0 }
     fun replacePosition(board: Map<Square, Piece>, turn: Color) {
         fun has(square: Square, piece: Piece) = board[square] == piece
         val whiteKing = has(Square(4, 0), Piece(Color.WHITE, PieceType.KING))
@@ -42,13 +44,23 @@ class ChessGame(start: Position = Position.initial()) {
         )
         reset(Position(board, turn, rights))
     }
-    fun goTo(ply: Int) { require(ply in 0 until timeline.size); position = timeline[ply]; while (moves.size > ply) moves.removeLast(); while (timeline.size > ply + 1) timeline.removeLast() }
+    fun goTo(ply: Int): Boolean {
+        if (ply !in timeline.indices) return false
+        currentPly = ply
+        position = timeline[ply]
+        return true
+    }
     fun legalMoves(from: Square? = null) = ChessRules.legalMoves(position).let { all -> if (from == null) all else all.filter { it.from == from } }
     fun candidateMoves(from: Square) = ChessRules.candidateMoves(position, from)
     fun play(move: Move): Boolean {
         val legal = legalMoves().firstOrNull { it == move } ?: return false
+        if (currentPly < moves.size) {
+            while (moves.size > currentPly) moves.removeLast()
+            while (timeline.size > currentPly + 1) timeline.removeLast()
+        }
         val notation = ChessRules.san(position, legal); position = ChessRules.applyMove(position, legal)
-        timeline += position; moves += PlayedMove(legal, notation, position); return true
+        timeline += position; moves += PlayedMove(legal, notation, position); currentPly++
+        return true
     }
 }
 
