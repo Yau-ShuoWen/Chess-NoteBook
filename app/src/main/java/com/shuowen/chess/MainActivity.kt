@@ -4,27 +4,94 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.graphics.Color as UiColor
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.shuowen.chess.chess.*
 import com.shuowen.chess.ui.theme.ChessNotebookTheme
 
-class MainActivity : ComponentActivity()
-{
-    override fun onCreate(savedInstanceState: Bundle?)
-    {
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            ChessNotebookTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android", modifier = Modifier.padding(innerPadding)
-                    )
+        setContent { ChessNotebookTheme(dynamicColor = false) { ChessEditor() } }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChessEditor() {
+    val game = remember { ChessGame() }
+    var revision by remember { mutableIntStateOf(0) }
+    var selected by remember { mutableStateOf<Square?>(null) }
+    var promotionMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
+    var setupMode by remember { mutableStateOf(false) }
+    var setupBoard by remember { mutableStateOf(game.position.board) }
+    var setupPiece by remember { mutableStateOf<Piece?>(Piece(Color.WHITE, PieceType.PAWN)) }
+    var setupTurn by remember { mutableStateOf(Color.WHITE) }
+    val position = remember(revision) { game.position }
+    val legalTargets = selected?.let { game.legalMoves(it).map(Move::to).toSet() } ?: emptySet()
+
+    Scaffold(topBar = { TopAppBar(title = { Text("国际象棋笔记") }) }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(statusText(position), fontWeight = FontWeight.SemiBold)
+                Row {
+                    TextButton(onClick = {
+                        if (setupMode) { game.replacePosition(setupBoard, setupTurn); revision++ }
+                        else { setupBoard = position.board; setupTurn = position.turn }
+                        selected = null; setupMode = !setupMode
+                    }) { Text(if (setupMode) "完成摆放" else "摆放棋子") }
+                    TextButton(onClick = { game.reset(); setupBoard = game.position.board; selected = null; setupMode = false; revision++ }) { Text("新对局") }
+                }
+            }
+            ChessBoard(if (setupMode) position.copy(board = setupBoard) else position, selected,
+                if (setupMode) emptySet() else legalTargets) { square ->
+                if (setupMode) setupBoard = setupBoard.toMutableMap().apply { if (setupPiece == null) remove(square) else put(square, setupPiece!!) }
+                else {
+                    val piece = position.board[square]
+                    if (selected == null) { if (piece?.color == position.turn) selected = square }
+                    else {
+                        val candidates = game.legalMoves(selected).filter { it.to == square }
+                        when { candidates.size > 1 -> promotionMoves = candidates
+                            candidates.size == 1 -> { game.play(candidates.single()); selected = null; revision++ }
+                            piece?.color == position.turn -> selected = square
+                            else -> selected = null }
+                    }
+                }
+            }
+            if (setupMode) SetupControls(setupPiece, setupTurn, { setupPiece = it }, { setupTurn = it }, { setupBoard = emptyMap() }, { setupBoard = Position.initial().board })
+            else MoveHistory(game.history) { ply -> game.goTo(ply); selected = null; revision++ }
+            Spacer(Modifier.weight(1f))
+            Text("点选棋子，再点目标格。棋谱会自动记录。", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+        }
+    }
+    if (promotionMoves.isNotEmpty()) AlertDialog(onDismissRequest = { promotionMoves = emptyList() }, title = { Text("选择升变棋子") },
+        text = { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { promotionMoves.forEach { move ->
+            Text(pieceGlyph(Piece(position.turn, move.promotion!!)), fontSize = 38.sp, modifier = Modifier.clickable { game.play(move); selected = null; promotionMoves = emptyList(); revision++ }.padding(8.dp))
+        } } }, confirmButton = {})
+}
+
+@Composable
+private fun ChessBoard(position: Position, selected: Square?, legalTargets: Set<Square>, onSquare: (Square) -> Unit) {
+    Column(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
+        for (rank in 7 downTo 0) Row(Modifier.weight(1f)) {
+            for (file in 0..7) { val square = Square(file, rank); val color = when {
+                square == selected -> UiColor(0xFFE5C65C); square in legalTargets -> UiColor(0xFF9DBA72)
+                (file + rank) % 2 == 0 -> UiColor(0xFFF0D9B5); else -> UiColor(0xFFB58863) }
+                Box(Modifier.weight(1f).fillMaxHeight().background(color).clickable { onSquare(square) }, contentAlignment = Alignment.Center) {
+                    position.board[square]?.let { Text(pieceGlyph(it), fontSize = 34.sp) }
                 }
             }
         }
@@ -32,18 +99,42 @@ class MainActivity : ComponentActivity()
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier)
-{
-    Text(
-        text = "Hello $name!", modifier = modifier
-    )
+private fun SetupControls(selected: Piece?, turn: Color, onPiece: (Piece?) -> Unit, onTurn: (Color) -> Unit, onClear: () -> Unit, onStandard: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(10.dp)) {
+        Text("选择棋子后点棋盘放置", fontWeight = FontWeight.Medium)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            item { FilterChip(selected == null, onClick = { onPiece(null) }, label = { Text("擦除") }) }
+            val pieces = Color.entries.flatMap { color -> PieceType.entries.map { Piece(color, it) } }
+            items(pieces.size) { index -> val piece = pieces[index]; FilterChip(selected == piece, onClick = { onPiece(piece) }, label = { Text(pieceGlyph(piece), fontSize = 24.sp) }) }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("轮到："); FilterChip(turn == Color.WHITE, onClick = { onTurn(Color.WHITE) }, label = { Text("白方") }); Spacer(Modifier.width(6.dp))
+            FilterChip(turn == Color.BLACK, onClick = { onTurn(Color.BLACK) }, label = { Text("黑方") }); Spacer(Modifier.weight(1f))
+            TextButton(onClick = onClear) { Text("清空") }; TextButton(onClick = onStandard) { Text("标准布局") }
+        }
+    } }
 }
 
-@Preview(showBackground = true)
 @Composable
-fun GreetingPreview()
-{
-    ChessNotebookTheme {
-        Greeting("Android")
+private fun MoveHistory(history: List<PlayedMove>, onGoTo: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth()) { Text("棋谱", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item { AssistChip(onClick = { onGoTo(0) }, label = { Text("起始") }) }
+            itemsIndexed(history) { index, move -> AssistChip(onClick = { onGoTo(index + 1) }, label = { Text(if (index % 2 == 0) "${index / 2 + 1}. ${move.notation}" else move.notation) }) }
+        }
     }
+}
+
+private fun statusText(position: Position) = when {
+    ChessRules.isCheckmate(position) -> if (position.turn == Color.WHITE) "白方被将死" else "黑方被将死"
+    ChessRules.isStalemate(position) -> "和棋：无子可动"
+    ChessRules.isInCheck(position, position.turn) -> if (position.turn == Color.WHITE) "白方被将军" else "黑方被将军"
+    position.turn == Color.WHITE -> "白方走棋"; else -> "黑方走棋"
+}
+
+private fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type) {
+    Color.WHITE to PieceType.KING -> "♔"; Color.WHITE to PieceType.QUEEN -> "♕"; Color.WHITE to PieceType.ROOK -> "♖"
+    Color.WHITE to PieceType.BISHOP -> "♗"; Color.WHITE to PieceType.KNIGHT -> "♘"; Color.WHITE to PieceType.PAWN -> "♙"
+    Color.BLACK to PieceType.KING -> "♚"; Color.BLACK to PieceType.QUEEN -> "♛"; Color.BLACK to PieceType.ROOK -> "♜"
+    Color.BLACK to PieceType.BISHOP -> "♝"; Color.BLACK to PieceType.KNIGHT -> "♞"; Color.BLACK to PieceType.PAWN -> "♟"; else -> ""
 }
