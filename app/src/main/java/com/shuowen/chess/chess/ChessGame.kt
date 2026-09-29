@@ -44,6 +44,7 @@ class ChessGame(start: Position = Position.initial()) {
     }
     fun goTo(ply: Int) { require(ply in 0 until timeline.size); position = timeline[ply]; while (moves.size > ply) moves.removeLast(); while (timeline.size > ply + 1) timeline.removeLast() }
     fun legalMoves(from: Square? = null) = ChessRules.legalMoves(position).let { all -> if (from == null) all else all.filter { it.from == from } }
+    fun candidateMoves(from: Square) = ChessRules.candidateMoves(position, from)
     fun play(move: Move): Boolean {
         val legal = legalMoves().firstOrNull { it == move } ?: return false
         val notation = ChessRules.san(position, legal); position = ChessRules.applyMove(position, legal)
@@ -55,9 +56,12 @@ object ChessRules {
     private val diagonals = listOf(1 to 1, 1 to -1, -1 to 1, -1 to -1)
     private val straights = listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)
 
+    fun candidateMoves(position: Position, from: Square): List<Move> =
+        if (position.board[from]?.color == position.turn) pseudoMoves(position, from) else emptyList()
+
     fun legalMoves(position: Position): List<Move> = position.board.filterValues { it.color == position.turn }
-        .flatMap { (square, _) -> pseudoMoves(position, square) }
-        .filter { !isInCheck(applyMove(position, it, false), position.turn) }
+        .flatMap { (square, _) -> candidateMoves(position, square) }
+        .filter { move -> castlePathIsSafe(position, move) && !isInCheck(applyMove(position, move, false), position.turn) }
     fun isInCheck(position: Position, color: Color): Boolean = position.board.entries.firstOrNull { it.value == Piece(color, PieceType.KING) }?.key?.let { isAttacked(position, it, color.opposite()) } ?: false
     fun isCheckmate(position: Position) = isInCheck(position, position.turn) && legalMoves(position).isEmpty()
     fun isStalemate(position: Position) = !isInCheck(position, position.turn) && legalMoves(position).isEmpty()
@@ -118,13 +122,20 @@ object ChessRules {
     private fun jumpMoves(p: Position, from: Square, color: Color, offsets: List<Pair<Int, Int>>) = offsets.mapNotNull { (df, dr) -> square(from.file + df, from.rank + dr)?.takeIf { p.board[it]?.color != color }?.let { Move(from, it) } }
     private fun slideMoves(p: Position, from: Square, color: Color, directions: List<Pair<Int, Int>>): List<Move> { val result = mutableListOf<Move>(); for ((df, dr) in directions) for (step in 1..7) { val to = square(from.file + df * step, from.rank + dr * step) ?: break; val target = p.board[to]; if (target?.color == color) break; result += Move(from, to); if (target != null) break }; return result }
     private fun kingMoves(p: Position, from: Square, color: Color): List<Move> {
-        val moves = jumpMoves(p, from, color, diagonals + straights).toMutableList(); if (isInCheck(p, color)) return moves; val rank = if (color == Color.WHITE) 0 else 7
+        val moves = jumpMoves(p, from, color, diagonals + straights).toMutableList(); val rank = if (color == Color.WHITE) 0 else 7
         if (from == Square(4, rank)) {
             val ks = if (color == Color.WHITE) p.castling.whiteKingSide else p.castling.blackKingSide
-            if (ks && p.board[Square(5, rank)] == null && p.board[Square(6, rank)] == null && p.board[Square(7, rank)] == Piece(color, PieceType.ROOK) && !isAttacked(p, Square(5, rank), color.opposite()) && !isAttacked(p, Square(6, rank), color.opposite())) moves += Move(from, Square(6, rank), isCastle = true)
+            if (ks && p.board[Square(5, rank)] == null && p.board[Square(6, rank)] == null && p.board[Square(7, rank)] == Piece(color, PieceType.ROOK)) moves += Move(from, Square(6, rank), isCastle = true)
             val qs = if (color == Color.WHITE) p.castling.whiteQueenSide else p.castling.blackQueenSide
-            if (qs && p.board[Square(1, rank)] == null && p.board[Square(2, rank)] == null && p.board[Square(3, rank)] == null && p.board[Square(0, rank)] == Piece(color, PieceType.ROOK) && !isAttacked(p, Square(3, rank), color.opposite()) && !isAttacked(p, Square(2, rank), color.opposite())) moves += Move(from, Square(2, rank), isCastle = true)
+            if (qs && p.board[Square(1, rank)] == null && p.board[Square(2, rank)] == null && p.board[Square(3, rank)] == null && p.board[Square(0, rank)] == Piece(color, PieceType.ROOK)) moves += Move(from, Square(2, rank), isCastle = true)
         }; return moves
+    }
+    private fun castlePathIsSafe(p: Position, move: Move): Boolean {
+        if (!move.isCastle) return true
+        val color = p.board[move.from]?.color ?: return false
+        if (isInCheck(p, color)) return false
+        val middleFile = if (move.to.file == 6) 5 else 3
+        return !isAttacked(p, Square(middleFile, move.from.rank), color.opposite())
     }
     private fun isAttacked(p: Position, target: Square, by: Color): Boolean {
         val pawnDirection = if (by == Color.WHITE) 1 else -1
