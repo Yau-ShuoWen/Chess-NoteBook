@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -73,7 +74,8 @@ private fun ChessEditor() {
                 }
             }
             ChessBoard(if (setupMode) position.copy(board = setupBoard) else position, selected,
-                if (setupMode) emptySet() else legalTargets, if (setupMode) emptySet() else forbiddenTargets, boardFlipped) { square ->
+                if (setupMode) emptySet() else legalTargets, if (setupMode) emptySet() else forbiddenTargets,
+                boardFlipped, showGameStatus = !setupMode) { square ->
                 if (setupMode) { setupBoard = setupBoard.toMutableMap().apply { if (setupPiece == null) remove(square) else put(square, setupPiece!!) }; setupError = null }
                 else {
                     val piece = position.board[square]
@@ -105,9 +107,20 @@ private fun ChessEditor() {
 }
 
 @Composable
-private fun ChessBoard(position: Position, selected: Square?, legalTargets: Set<Square>, forbiddenTargets: Set<Square>, flipped: Boolean, onSquare: (Square) -> Unit) {
+private fun ChessBoard(
+    position: Position,
+    selected: Square?,
+    legalTargets: Set<Square>,
+    forbiddenTargets: Set<Square>,
+    flipped: Boolean,
+    showGameStatus: Boolean,
+    onSquare: (Square) -> Unit,
+) {
     val ranks = if (flipped) 0..7 else 7 downTo 0
     val files = if (flipped) 7 downTo 0 else 0..7
+    val checkedKing = if (showGameStatus && ChessRules.isInCheck(position, position.turn))
+        position.board.entries.firstOrNull { it.value == Piece(position.turn, PieceType.KING) }?.key else null
+    val checkmated = checkedKing != null && ChessRules.isCheckmate(position)
     Column(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
         for (rank in ranks) Row(Modifier.weight(1f)) {
             for (file in files) { val square = Square(file, rank); val color = when {
@@ -118,9 +131,12 @@ private fun ChessBoard(position: Position, selected: Square?, legalTargets: Set<
                     (file + rank) % 2 == 0 -> UiColor(0xFFC3A77E)
                     else -> UiColor(0xFF815D45)
                 } else color
-                Box(Modifier.weight(1f).fillMaxHeight().background(displayColor).clickable { onSquare(square) }, contentAlignment = Alignment.Center) {
+                var squareModifier = Modifier.weight(1f).fillMaxHeight().background(displayColor)
+                if (square == checkedKing) squareModifier = squareModifier.border(3.dp, UiColor(0xFFD32F2F))
+                Box(squareModifier.clickable { onSquare(square) }, contentAlignment = Alignment.Center) {
                     position.board[square]?.let { Text(pieceGlyph(it), fontSize = 34.sp) }
-                    if (square in legalTargets && !isCapture) Box(Modifier.size(12.dp).background(UiColor(0x99606060), CircleShape))
+                    if (square == checkedKing && checkmated) Text("×", color = UiColor(0xFFD32F2F), fontSize = 42.sp, fontWeight = FontWeight.Bold)
+                    else if (square in legalTargets && !isCapture) Box(Modifier.size(12.dp).background(UiColor(0x99606060), CircleShape))
                     else if (square in forbiddenTargets) Text("×", color = UiColor(0xFF555555), fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 }
             }
