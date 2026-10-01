@@ -221,9 +221,15 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 item {
                     NavigationControls(
                         atRoot = tree.currentNodeId == tree.rootId,
-                        hasExistingBranches = tree.children().isNotEmpty(),
+                        nextCount = tree.children().size,
                         reviewMode = reviewMode,
-                        onBack = { if (tree.back()) refresh() },
+                        onPrevious = { if (tree.back()) refresh() },
+                        onNext = {
+                            tree.children().singleOrNull()?.let { node ->
+                                tree.goTo(node.id)
+                                refresh()
+                            }
+                        },
                         onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
                         onCreateBranch = { reviewMode = false; selected = null },
                     )
@@ -289,18 +295,22 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
 @Composable
 private fun NavigationControls(
     atRoot: Boolean,
-    hasExistingBranches: Boolean,
+    nextCount: Int,
     reviewMode: Boolean,
-    onBack: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     onUndo: () -> Unit,
     onCreateBranch: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button(onClick = onBack, enabled = !atRoot, modifier = Modifier.weight(1f)) { Text("回退一步") }
-            TextButton(onClick = onUndo, enabled = !atRoot, modifier = Modifier.weight(1f)) { Text("撤销本分支") }
+            Button(onClick = onPrevious, enabled = !atRoot, modifier = Modifier.weight(1f)) { Text("上一步") }
+            Button(onClick = onNext, enabled = nextCount == 1, modifier = Modifier.weight(1f)) {
+                Text(if (nextCount > 1) "请选择分支" else "下一步")
+            }
+            TextButton(onClick = onUndo, enabled = !atRoot) { Text("撤销") }
         }
-        if (hasExistingBranches) {
+        if (nextCount > 0) {
             TextButton(onClick = onCreateBranch, modifier = Modifier.fillMaxWidth()) {
                 Text(if (reviewMode) "从当前位置创建新分支" else "走不同着法即可创建新分支")
             }
