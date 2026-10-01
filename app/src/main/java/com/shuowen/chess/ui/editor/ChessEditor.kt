@@ -233,6 +233,7 @@ internal fun ChessBoard(
     forbiddenTargets: Set<Square>,
     flipped: Boolean,
     showGameStatus: Boolean,
+    moveBadges: Map<Square, String> = emptyMap(),
     onSquare: (Square) -> Unit,
 ) {
     val ranks = if (flipped) 0..7 else 7 downTo 0
@@ -286,6 +287,18 @@ internal fun ChessBoard(
                                 color = UiColor(0xFF555555),
                                 fontSize = 30.sp,
                                 fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        moveBadges[square]?.let { label ->
+                            Text(
+                                text = label,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                    .padding(horizontal = 3.dp, vertical = 1.dp),
                             )
                         }
                     }
