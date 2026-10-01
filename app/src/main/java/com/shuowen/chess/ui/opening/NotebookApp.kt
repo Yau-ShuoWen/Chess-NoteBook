@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -241,21 +239,6 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     )
                 }
                 item {
-                    CurrentPath(tree.pathTo(), tree.currentNodeId, onNode = { id ->
-                        tree.goTo(id)
-                        refresh()
-                    }, onRoot = {
-                        tree.goTo(tree.rootId)
-                        refresh()
-                    })
-                }
-                item {
-                    NextMoves(tree.children()) { node ->
-                        tree.goTo(node.id)
-                        refresh()
-                    }
-                }
-                item {
                     Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                     VariationTree(
                         document = document,
@@ -329,33 +312,6 @@ private fun NavigationControls(
 }
 
 @Composable
-private fun CurrentPath(path: List<OpeningNode>, currentId: String, onNode: (String) -> Unit, onRoot: () -> Unit) {
-    Text("当前路线", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        item { AssistChip(onClick = onRoot, label = { Text("起始") }) }
-        items(path, key = { it.id }) { node ->
-            AssistChip(onClick = { onNode(node.id) }, label = {
-                Text(if (node.id == currentId) "${node.notation} · 当前" else node.notation.orEmpty())
-            })
-        }
-    }
-}
-
-@Composable
-private fun NextMoves(nodes: List<OpeningNode>, onNode: (OpeningNode) -> Unit) {
-    Text("下一步可能", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-    if (nodes.isEmpty()) {
-        Text("这里还没有记录后续着法。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    } else {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(nodes, key = { it.id }) { node ->
-                AssistChip(onClick = { onNode(node) }, label = { Text(node.notation.orEmpty()) })
-            }
-        }
-    }
-}
-
-@Composable
 private fun VariationTree(
     document: OpeningDocument,
     treeRevision: Int,
@@ -370,10 +326,14 @@ private fun VariationTree(
         val horizontalScroll = rememberScrollState()
         val maxDepth = layout.maxOf { it.depth }
         val maxRow = layout.maxOf { it.row }
-        val diagramWidth = (maxDepth * 116 + 92).dp
-        val diagramHeight = (maxRow * 56 + 48).dp
+        val diagramWidth = (maxRow * 96 + 88).dp
+        val diagramHeight = (maxDepth * 64 + 44).dp
         val lineColor = MaterialTheme.colorScheme.outline
+        val activeLineColor = MaterialTheme.colorScheme.primary
         val pointsById = remember(layout) { layout.associateBy { it.node.id } }
+        val currentPathIds = remember(currentNodeId, treeRevision) {
+            (tree.pathTo(currentNodeId).map { it.id } + tree.rootId).toSet()
+        }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -384,24 +344,27 @@ private fun VariationTree(
             Canvas(Modifier.matchParentSize()) {
                 layout.filter { it.parentId != null }.forEach { child ->
                     val parent = pointsById.getValue(child.parentId ?: return@forEach)
-                    val start = Offset(parent.depth * 116.dp.toPx() + 84.dp.toPx(), parent.row * 56.dp.toPx() + 20.dp.toPx())
-                    val end = Offset(child.depth * 116.dp.toPx() + 8.dp.toPx(), child.row * 56.dp.toPx() + 20.dp.toPx())
-                    val middleX = (start.x + end.x) / 2
-                    drawLine(lineColor, start, Offset(middleX, start.y), strokeWidth = 2.dp.toPx())
-                    drawLine(lineColor, Offset(middleX, start.y), Offset(middleX, end.y), strokeWidth = 2.dp.toPx())
-                    drawLine(lineColor, Offset(middleX, end.y), end, strokeWidth = 2.dp.toPx())
+                    val start = Offset(parent.row * 96.dp.toPx() + 42.dp.toPx(), parent.depth * 64.dp.toPx() + 38.dp.toPx())
+                    val end = Offset(child.row * 96.dp.toPx() + 42.dp.toPx(), child.depth * 64.dp.toPx() + 2.dp.toPx())
+                    val middleY = (start.y + end.y) / 2
+                    val edgeColor = if (child.node.id in currentPathIds) activeLineColor else lineColor
+                    drawLine(edgeColor, start, Offset(start.x, middleY), strokeWidth = 2.dp.toPx())
+                    drawLine(edgeColor, Offset(start.x, middleY), Offset(end.x, middleY), strokeWidth = 2.dp.toPx())
+                    drawLine(edgeColor, Offset(end.x, middleY), end, strokeWidth = 2.dp.toPx())
                 }
             }
             layout.forEach { point ->
                 val isCurrent = point.node.id == currentNodeId
+                val isOnCurrentPath = point.node.id in currentPathIds
                 Card(
                     modifier = Modifier
-                        .offset(x = (point.depth * 116 + 8).dp, y = (point.row * 56 + 2).dp)
+                        .offset(x = (point.row * 96 + 4).dp, y = (point.depth * 64 + 2).dp)
                         .width(76.dp)
                         .height(36.dp)
                         .clickable { onNode(point.node.id) },
                     colors = CardDefaults.cardColors(
                         containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+                        else if (isOnCurrentPath) MaterialTheme.colorScheme.secondaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
                     ),
                 ) {
