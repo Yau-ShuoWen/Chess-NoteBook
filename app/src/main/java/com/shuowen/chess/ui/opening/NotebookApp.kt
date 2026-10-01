@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -47,10 +48,13 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
@@ -334,9 +338,27 @@ private fun VariationTree(
     val layout = remember(document.id, treeRevision) { buildTreeLayout(tree) }
     var pan by remember(document.id) { mutableStateOf(Offset.Zero) }
     var scale by remember(document.id) { mutableFloatStateOf(1f) }
+    var viewportSize by remember(document.id) { mutableStateOf(IntSize.Zero) }
+    var initiallyPositioned by remember(document.id) { mutableStateOf(false) }
+    val density = LocalDensity.current
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(0.5f, 2.5f)
         pan += panChange
+    }
+    LaunchedEffect(layout, viewportSize) {
+        if (!initiallyPositioned && layout.size > 1 && viewportSize != IntSize.Zero) {
+            val root = layout.first { it.node.id == tree.rootId }
+            val rootCenterX = with(density) {
+                (root.row * TREE_COLUMN_WIDTH + TREE_PADDING + TREE_MAX_NODE_WIDTH / 2f).dp.toPx()
+            }
+            val rootTop = with(density) { (root.depth * TREE_ROW_HEIGHT + 2).dp.toPx() }
+            pan = Offset(
+                x = viewportSize.width / 2f - rootCenterX,
+                y = with(density) { 8.dp.toPx() } - rootTop,
+            )
+            scale = 1f
+            initiallyPositioned = true
+        }
     }
     if (layout.size == 1) {
         Box(modifier, contentAlignment = Alignment.Center) {
@@ -364,6 +386,7 @@ private fun VariationTree(
         Box(
             modifier
                 .clipToBounds()
+                .onSizeChanged { viewportSize = it }
                 .transformable(transformState),
         ) {
             Box(
