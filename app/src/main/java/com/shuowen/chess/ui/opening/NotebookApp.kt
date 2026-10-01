@@ -152,21 +152,23 @@ private fun DocumentList(
 @Composable
 private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack: () -> Unit) {
     val tree = document.tree
-    var revision by remember(document.id) { mutableIntStateOf(0) }
+    var screenRevision by remember(document.id) { mutableIntStateOf(0) }
+    var treeRevision by remember(document.id) { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<Square?>(null) }
     var promotionMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
     var flipped by remember { mutableStateOf(false) }
     var reviewMode by remember { mutableStateOf(false) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
 
-    fun refresh(save: Boolean = false) {
+    fun refresh(save: Boolean = false, treeChanged: Boolean = false) {
         selected = null
-        revision++
+        screenRevision++
+        if (treeChanged) treeRevision++
         if (save) onSave()
     }
 
     BackHandler(onBack = onBack)
-    val position = tree.currentPosition
+    val position = remember(screenRevision) { tree.currentPosition }
     val legalTargets = selected?.let { from ->
         com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
     }.orEmpty()
@@ -211,7 +213,9 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                                 .filter { it.from == selected && it.to == square }
                             when {
                                 candidates.size > 1 -> promotionMoves = candidates
-                                candidates.size == 1 -> if (tree.play(candidates.single())) refresh(save = true)
+                                candidates.size == 1 -> if (tree.play(candidates.single())) {
+                                    refresh(save = true, treeChanged = true)
+                                }
                                 position.board[square]?.color == position.turn -> selected = square
                                 else -> selected = null
                             }
@@ -225,7 +229,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     hasExistingBranches = tree.children().isNotEmpty(),
                     reviewMode = reviewMode,
                     onBack = { if (tree.back()) refresh() },
-                    onUndo = { if (tree.undoBranch()) refresh(save = true) },
+                    onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
                     onCreateBranch = { reviewMode = false; selected = null },
                 )
             }
@@ -246,7 +250,11 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             }
             item {
                 Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                VariationTree(document, revision) { id ->
+                VariationTree(
+                    document = document,
+                    treeRevision = treeRevision,
+                    currentNodeId = tree.currentNodeId,
+                ) { id ->
                     tree.goTo(id)
                     refresh()
                 }
@@ -261,7 +269,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             turn = position.turn,
             onDismiss = { promotionMoves = emptyList() },
             onSelect = { move ->
-                if (tree.play(move)) refresh(save = true)
+                if (tree.play(move)) refresh(save = true, treeChanged = true)
                 promotionMoves = emptyList()
             },
         )
@@ -275,7 +283,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 document.name = name.ifBlank { "未命名开局" }
                 document.description = description
                 editMetadata = false
-                revision++
+                screenRevision++
                 onSave()
             },
         )
@@ -336,9 +344,14 @@ private fun NextMoves(nodes: List<OpeningNode>, onNode: (OpeningNode) -> Unit) {
 }
 
 @Composable
-private fun VariationTree(document: OpeningDocument, revision: Int, onNode: (String) -> Unit) {
+private fun VariationTree(
+    document: OpeningDocument,
+    treeRevision: Int,
+    currentNodeId: String,
+    onNode: (String) -> Unit,
+) {
     val tree = document.tree
-    val layout = remember(document.id, revision) { buildTreeLayout(tree) }
+    val layout = remember(document.id, treeRevision) { buildTreeLayout(tree) }
     if (layout.size == 1) {
         Text("走出第一步后，分支会显示在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
@@ -348,6 +361,7 @@ private fun VariationTree(document: OpeningDocument, revision: Int, onNode: (Str
         val diagramWidth = (maxDepth * 116 + 92).dp
         val diagramHeight = (maxRow * 56 + 48).dp
         val lineColor = MaterialTheme.colorScheme.outline
+        val pointsById = remember(layout) { layout.associateBy { it.node.id } }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -357,7 +371,7 @@ private fun VariationTree(document: OpeningDocument, revision: Int, onNode: (Str
         ) {
             Canvas(Modifier.matchParentSize()) {
                 layout.filter { it.parentId != null }.forEach { child ->
-                    val parent = layout.first { it.node.id == child.parentId }
+                    val parent = pointsById.getValue(child.parentId ?: return@forEach)
                     val start = Offset(parent.depth * 116.dp.toPx() + 84.dp.toPx(), parent.row * 56.dp.toPx() + 20.dp.toPx())
                     val end = Offset(child.depth * 116.dp.toPx() + 8.dp.toPx(), child.row * 56.dp.toPx() + 20.dp.toPx())
                     val middleX = (start.x + end.x) / 2
@@ -367,7 +381,7 @@ private fun VariationTree(document: OpeningDocument, revision: Int, onNode: (Str
                 }
             }
             layout.forEach { point ->
-                val isCurrent = point.node.id == tree.currentNodeId
+                val isCurrent = point.node.id == currentNodeId
                 Card(
                     modifier = Modifier
                         .offset(x = (point.depth * 116 + 8).dp, y = (point.row * 56 + 2).dp)
