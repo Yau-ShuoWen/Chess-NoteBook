@@ -240,7 +240,7 @@ internal fun ChessBoard(
     forbiddenTargets: Set<Square>,
     flipped: Boolean,
     showGameStatus: Boolean,
-    moveBadges: Set<Square> = emptySet(),
+    possibleMoves: List<Move> = emptyList(),
     lastMove: Move? = null,
     verticalPadding: Dp = 8.dp,
     onSquare: (Square) -> Unit,
@@ -299,20 +299,12 @@ internal fun ChessBoard(
                                 fontWeight = FontWeight.Bold,
                             )
                         }
-                        if (square in moveBadges) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                    .size(10.dp),
-                            )
-                        }
                     }
                     }
                 }
             }
         }
-        lastMove?.let { move ->
+        if (possibleMoves.isNotEmpty() || lastMove != null) {
             Canvas(Modifier.matchParentSize()) {
                 fun center(square: Square): Offset {
                     val shownFile = if (flipped) 7 - square.file else square.file
@@ -323,25 +315,32 @@ internal fun ChessBoard(
                     )
                 }
 
-                val start = center(move.from)
-                val end = center(move.to)
-                val color = UiColor(0xE6E53935)
-                val stroke = 2.5.dp.toPx()
-                drawLine(color, start, end, strokeWidth = stroke, cap = StrokeCap.Round)
+                fun drawMoveArrow(move: Move, color: UiColor, stroke: Float) {
+                    val start = center(move.from)
+                    val end = center(move.to)
+                    drawLine(color, start, end, strokeWidth = stroke, cap = StrokeCap.Round)
 
-                val angle = atan2(end.y - start.y, end.x - start.x)
-                val headLength = 10.dp.toPx()
-                val spread = 0.48f
-                val left = Offset(
-                    end.x - headLength * cos(angle - spread),
-                    end.y - headLength * sin(angle - spread),
-                )
-                val right = Offset(
-                    end.x - headLength * cos(angle + spread),
-                    end.y - headLength * sin(angle + spread),
-                )
-                drawLine(color, end, left, strokeWidth = stroke, cap = StrokeCap.Round)
-                drawLine(color, end, right, strokeWidth = stroke, cap = StrokeCap.Round)
+                    val angle = atan2(end.y - start.y, end.x - start.x)
+                    val headLength = 10.dp.toPx()
+                    val spread = 0.48f
+                    val left = Offset(
+                        end.x - headLength * cos(angle - spread),
+                        end.y - headLength * sin(angle - spread),
+                    )
+                    val right = Offset(
+                        end.x - headLength * cos(angle + spread),
+                        end.y - headLength * sin(angle + spread),
+                    )
+                    drawLine(color, end, left, strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(color, end, right, strokeWidth = stroke, cap = StrokeCap.Round)
+                }
+
+                possibleMoves.forEach { move ->
+                    drawMoveArrow(move, UiColor(0xE600A86B), 2.5.dp.toPx())
+                }
+                lastMove?.let { move ->
+                    drawMoveArrow(move, UiColor(0xE6E53935), 2.5.dp.toPx())
+                }
             }
         }
     }

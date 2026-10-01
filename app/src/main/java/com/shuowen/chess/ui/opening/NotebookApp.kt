@@ -176,10 +176,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     val legalTargets = selected?.let { from ->
         com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
     }.orEmpty()
-    val nextMoveBadges = tree.children()
-        .filter { it.move != null }
-        .map { it.move!!.from }
-        .toSet()
+    val possibleMoves = tree.children().mapNotNull { it.move }
 
     Scaffold(
         topBar = {
@@ -213,7 +210,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 forbiddenTargets = emptySet(),
                 flipped = flipped,
                 showGameStatus = true,
-                moveBadges = nextMoveBadges,
+                possibleMoves = possibleMoves,
                 lastMove = tree.currentNode.move,
                 verticalPadding = 0.dp,
             ) { square ->
