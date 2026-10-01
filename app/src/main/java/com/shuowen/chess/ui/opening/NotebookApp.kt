@@ -292,7 +292,10 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     if (editNode) {
         NodeNameDialog(
             standardName = tree.currentNode.notation ?: "起始",
-            initialName = tree.currentNode.label.orEmpty(),
+            initialName = tree.currentNode.label ?: if (
+                tree.currentNode.move != null &&
+                tree.currentNode.position.turn == com.shuowen.chess.chess.Color.WHITE
+            ) "对方" else "",
             onDismiss = { editNode = false },
             onSave = { name ->
                 tree.currentNode.label = name.trim().takeIf { it.isNotEmpty() }
