@@ -48,6 +48,7 @@ import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
 import com.shuowen.chess.opening.OpeningNode
 import com.shuowen.chess.opening.OpeningRepository
+import com.shuowen.chess.opening.displayName
 import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
@@ -157,6 +158,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var flipped by remember { mutableStateOf(false) }
     var reviewMode by remember { mutableStateOf(false) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
+    var editNode by remember { mutableStateOf(false) }
 
     fun refresh(save: Boolean = false, treeChanged: Boolean = false) {
         selected = null
@@ -174,7 +176,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     val nextMoveBadges = recordedNextMoves
         .filter { it.move != null }
         .groupBy { it.move!!.from }
-        .mapValues { (_, nodes) -> nodes.joinToString("/") { it.notation.orEmpty() } }
+        .mapValues { (_, nodes) -> nodes.joinToString("/") { it.displayName } }
 
     Scaffold(
         topBar = {
@@ -237,6 +239,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                         },
                         onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
                         onCreateBranch = { reviewMode = false; selected = null },
+                        onEditNode = { editNode = true },
                     )
                 }
                 item {
@@ -280,6 +283,18 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             },
         )
     }
+    if (editNode) {
+        NodeNameDialog(
+            standardName = tree.currentNode.notation ?: "起始",
+            initialName = tree.currentNode.label.orEmpty(),
+            onDismiss = { editNode = false },
+            onSave = { name ->
+                tree.currentNode.label = name.trim().takeIf { it.isNotEmpty() }
+                editNode = false
+                refresh(save = true, treeChanged = true)
+            },
+        )
+    }
 }
 
 @Composable
@@ -291,6 +306,7 @@ private fun NavigationControls(
     onNext: () -> Unit,
     onUndo: () -> Unit,
     onCreateBranch: () -> Unit,
+    onEditNode: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -305,6 +321,7 @@ private fun NavigationControls(
                 Text(if (reviewMode) "从当前位置创建新分支" else "走不同着法即可创建新分支")
             }
         }
+        TextButton(onClick = onEditNode, modifier = Modifier.align(Alignment.End)) { Text("编辑节点") }
         Text(
             if (reviewMode) "查看模式：选择下方候选着法继续。" else "录入模式：在棋盘走棋；回退不会删除已有棋谱。",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -371,7 +388,7 @@ private fun VariationTree(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = point.node.notation ?: "起始",
+                            text = point.node.displayName,
                             fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                         )
                     }
@@ -379,6 +396,37 @@ private fun VariationTree(
             }
         }
     }
+}
+
+@Composable
+private fun NodeNameDialog(
+    standardName: String,
+    initialName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑节点") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("节点名称") },
+                    placeholder = { Text(standardName) },
+                    singleLine = true,
+                )
+                Text(
+                    "填写名称后只显示自定义名称；清空则恢复显示 $standardName。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(name) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 private data class TreePoint(
