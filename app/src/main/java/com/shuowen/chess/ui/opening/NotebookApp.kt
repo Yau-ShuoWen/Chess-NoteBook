@@ -516,23 +516,22 @@ private data class TreePoint(
 )
 
 private fun buildTreeLayout(tree: com.shuowen.chess.opening.OpeningTree): List<TreePoint> {
-    val result = mutableListOf<TreePoint>()
-    var nextLeafRow = 0f
+    val levels = mutableListOf<MutableList<OpeningNode>>()
 
-    fun place(node: OpeningNode, depth: Int): Float {
-        val children = tree.children(node.id)
-        val row = if (children.isEmpty()) {
-            nextLeafRow.also { nextLeafRow += 1f }
-        } else {
-            val childRows = children.map { place(it, depth + 1) }
-            (childRows.first() + childRows.last()) / 2f
-        }
-        result += TreePoint(node, node.parentId, depth, row)
-        return row
+    fun collect(node: OpeningNode, depth: Int) {
+        while (levels.size <= depth) levels += mutableListOf<OpeningNode>()
+        levels[depth] += node
+        tree.children(node.id).forEach { child -> collect(child, depth + 1) }
     }
 
-    place(tree.node(tree.rootId)!!, 0)
-    return result
+    collect(tree.node(tree.rootId)!!, 0)
+    val widestLevel = levels.maxOf { it.size }
+    return levels.flatMapIndexed { depth, nodes ->
+        val leadingSpace = (widestLevel - nodes.size) / 2f
+        nodes.mapIndexed { index, node ->
+            TreePoint(node, node.parentId, depth, leadingSpace + index)
+        }
+    }
 }
 
 @Composable
