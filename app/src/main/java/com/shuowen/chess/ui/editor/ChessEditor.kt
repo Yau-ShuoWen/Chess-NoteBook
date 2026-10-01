@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color as UiColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.shuowen.chess.chess.ChessGame
 import com.shuowen.chess.chess.ChessRules
@@ -241,6 +242,7 @@ internal fun ChessBoard(
     showGameStatus: Boolean,
     moveBadges: Set<Square> = emptySet(),
     lastMove: Move? = null,
+    verticalPadding: Dp = 8.dp,
     onSquare: (Square) -> Unit,
 ) {
     val ranks = if (flipped) 0..7 else 7 downTo 0
@@ -252,7 +254,7 @@ internal fun ChessBoard(
     }
     val checkmated = checkedKing != null && ChessRules.isCheckmate(position)
 
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = verticalPadding)) {
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
                 Row(Modifier.weight(1f)) {

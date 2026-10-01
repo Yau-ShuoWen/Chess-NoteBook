@@ -184,21 +184,28 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(document.name) },
+                title = {
+                    Column {
+                        Text(document.name, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                        Text(
+                            statusText(position),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
-                actions = { TextButton(onClick = { editMetadata = true }) { Text("名称与说明") } },
+                actions = {
+                    TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
+                    TextButton(onClick = { reviewMode = !reviewMode; selected = null }) {
+                        Text(if (reviewMode) "录入" else "查看")
+                    }
+                    TextButton(onClick = { editMetadata = true }) { Text("信息") }
+                },
             )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(statusText(position), fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
-                TextButton(onClick = { reviewMode = !reviewMode; selected = null }) {
-                    Text(if (reviewMode) "录入" else "查看")
-                }
-            }
             ChessBoard(
                 position = position,
                 selected = selected,
@@ -208,6 +215,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 showGameStatus = true,
                 moveBadges = nextMoveBadges,
                 lastMove = tree.currentNode.move,
+                verticalPadding = 0.dp,
             ) { square ->
                 if (reviewMode) return@ChessBoard
                 if (selected == square) {
