@@ -354,7 +354,7 @@ private fun VariationTree(
     } else {
         val horizontalScroll = rememberScrollState()
         val diagramWidth = layout.maxOf { point ->
-            point.row * TREE_COLUMN_WIDTH + nodeWidth(point.node.displayName) + TREE_PADDING * 2
+            point.row * TREE_COLUMN_WIDTH + TREE_MAX_NODE_WIDTH + TREE_PADDING * 2
         }.dp
         val diagramHeight = layout.maxOf { point ->
             point.depth * TREE_ROW_HEIGHT + nodeHeight(point.node.displayName) + 6
@@ -375,16 +375,20 @@ private fun VariationTree(
             Canvas(Modifier.matchParentSize()) {
                 layout.filter { it.parentId != null }.forEach { child ->
                     val parent = pointsById.getValue(child.parentId ?: return@forEach)
-                    val parentX = (parent.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp.toPx()
+                    val parentCenterX = (
+                        parent.row * TREE_COLUMN_WIDTH + TREE_PADDING + TREE_MAX_NODE_WIDTH / 2f
+                    ).dp.toPx()
                     val parentY = (parent.depth * TREE_ROW_HEIGHT + 2).dp.toPx()
-                    val childX = (child.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp.toPx()
+                    val childCenterX = (
+                        child.row * TREE_COLUMN_WIDTH + TREE_PADDING + TREE_MAX_NODE_WIDTH / 2f
+                    ).dp.toPx()
                     val childY = (child.depth * TREE_ROW_HEIGHT + 2).dp.toPx()
                     val start = Offset(
-                        parentX + nodeWidth(parent.node.displayName).dp.toPx() / 2,
+                        parentCenterX,
                         parentY + nodeHeight(parent.node.displayName).dp.toPx(),
                     )
                     val end = Offset(
-                        childX + nodeWidth(child.node.displayName).dp.toPx() / 2,
+                        childCenterX,
                         childY,
                     )
                     val middleY = (start.y + end.y) / 2
@@ -398,13 +402,17 @@ private fun VariationTree(
                 val isCurrent = point.node.id == currentNodeId
                 val isOnCurrentPath = point.node.id in currentPathIds
                 val displayName = point.node.displayName
+                val width = nodeWidth(displayName)
                 Card(
                     modifier = Modifier
                         .offset(
-                            x = (point.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp,
+                            x = (
+                                point.row * TREE_COLUMN_WIDTH + TREE_PADDING +
+                                    (TREE_MAX_NODE_WIDTH - width) / 2f
+                            ).dp,
                             y = (point.depth * TREE_ROW_HEIGHT + 2).dp,
                         )
-                        .width(nodeWidth(displayName).dp)
+                        .width(width.dp)
                         .height(nodeHeight(displayName).dp)
                         .combinedClickable(
                             onClick = { onNode(point.node.id) },
@@ -466,8 +474,9 @@ private fun NodeNameDialog(
 private const val TREE_COLUMN_WIDTH = 172
 private const val TREE_ROW_HEIGHT = 88
 private const val TREE_PADDING = 8
+private const val TREE_MAX_NODE_WIDTH = 156
 
-private fun nodeWidth(name: String): Int = (name.length * 15 + 24).coerceIn(76, 156)
+private fun nodeWidth(name: String): Int = (name.length * 15 + 24).coerceIn(76, TREE_MAX_NODE_WIDTH)
 
 private fun nodeHeight(name: String): Int = when {
     name.length <= 8 -> 36
