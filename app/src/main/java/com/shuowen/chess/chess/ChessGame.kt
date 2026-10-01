@@ -1,38 +1,101 @@
 package com.shuowen.chess.chess
 
-enum class Color { WHITE, BLACK; fun opposite() = if (this == WHITE) BLACK else WHITE }
-enum class PieceType { KING, QUEEN, ROOK, BISHOP, KNIGHT, PAWN }
+enum class Color {
+    WHITE,
+    BLACK;
+
+    fun opposite() = if (this == WHITE) BLACK else WHITE
+}
+
+enum class PieceType {
+    KING,
+    QUEEN,
+    ROOK,
+    BISHOP,
+    KNIGHT,
+    PAWN,
+}
+
 data class Piece(val color: Color, val type: PieceType)
+
 data class Square(val file: Int, val rank: Int) {
-    init { require(file in 0..7 && rank in 0..7) }
+    init {
+        require(file in 0..7 && rank in 0..7)
+    }
+
     val name get() = "${('a'.code + file).toChar()}${rank + 1}"
 }
-data class Move(val from: Square, val to: Square, val promotion: PieceType? = null, val isEnPassant: Boolean = false, val isCastle: Boolean = false)
-data class CastlingRights(val whiteKingSide: Boolean = true, val whiteQueenSide: Boolean = true, val blackKingSide: Boolean = true, val blackQueenSide: Boolean = true)
-data class Position(val board: Map<Square, Piece>, val turn: Color = Color.WHITE, val castling: CastlingRights = CastlingRights(), val enPassant: Square? = null, val halfMoveClock: Int = 0, val fullMoveNumber: Int = 1) {
+
+data class Move(
+    val from: Square,
+    val to: Square,
+    val promotion: PieceType? = null,
+    val isEnPassant: Boolean = false,
+    val isCastle: Boolean = false,
+)
+
+data class CastlingRights(
+    val whiteKingSide: Boolean = true,
+    val whiteQueenSide: Boolean = true,
+    val blackKingSide: Boolean = true,
+    val blackQueenSide: Boolean = true,
+)
+
+data class Position(
+    val board: Map<Square, Piece>,
+    val turn: Color = Color.WHITE,
+    val castling: CastlingRights = CastlingRights(),
+    val enPassant: Square? = null,
+    val halfMoveClock: Int = 0,
+    val fullMoveNumber: Int = 1,
+) {
     companion object {
         fun initial(): Position {
             val board = mutableMapOf<Square, Piece>()
-            val back = listOf(PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK)
+            val back = listOf(
+                PieceType.ROOK,
+                PieceType.KNIGHT,
+                PieceType.BISHOP,
+                PieceType.QUEEN,
+                PieceType.KING,
+                PieceType.BISHOP,
+                PieceType.KNIGHT,
+                PieceType.ROOK,
+            )
             for (file in 0..7) {
-                board[Square(file, 0)] = Piece(Color.WHITE, back[file]); board[Square(file, 1)] = Piece(Color.WHITE, PieceType.PAWN)
-                board[Square(file, 6)] = Piece(Color.BLACK, PieceType.PAWN); board[Square(file, 7)] = Piece(Color.BLACK, back[file])
+                board[Square(file, 0)] = Piece(Color.WHITE, back[file])
+                board[Square(file, 1)] = Piece(Color.WHITE, PieceType.PAWN)
+                board[Square(file, 6)] = Piece(Color.BLACK, PieceType.PAWN)
+                board[Square(file, 7)] = Piece(Color.BLACK, back[file])
             }
             return Position(board)
         }
     }
 }
 data class PlayedMove(val move: Move, val notation: String, val position: Position)
-data class SetupValidation(val errors: List<String>) { val isValid get() = errors.isEmpty() }
+
+data class SetupValidation(val errors: List<String>) {
+    val isValid get() = errors.isEmpty()
+}
 
 class ChessGame(start: Position = Position.initial()) {
-    var position = start; private set
+    var position = start
+        private set
     private val timeline = mutableListOf(start)
     private val moves = mutableListOf<PlayedMove>()
     var currentPly = 0
         private set
-    val history: List<PlayedMove> get() = moves
-    fun reset(position: Position = Position.initial()) { this.position = position; timeline.clear(); timeline += position; moves.clear(); currentPly = 0 }
+    val history: List<PlayedMove>
+        get() = moves
+
+    fun reset(position: Position = Position.initial()) {
+        this.position = position
+        timeline.clear()
+        timeline += position
+        moves.clear()
+        currentPly = 0
+    }
+
     fun replacePosition(board: Map<Square, Piece>, turn: Color) {
         fun has(square: Square, piece: Piece) = board[square] == piece
         val whiteKing = has(Square(4, 0), Piece(Color.WHITE, PieceType.KING))
@@ -51,16 +114,23 @@ class ChessGame(start: Position = Position.initial()) {
         position = timeline[ply]
         return true
     }
-    fun legalMoves(from: Square? = null) = ChessRules.legalMoves(position).let { all -> if (from == null) all else all.filter { it.from == from } }
+    fun legalMoves(from: Square? = null): List<Move> = ChessRules.legalMoves(position).let { all ->
+        if (from == null) all else all.filter { it.from == from }
+    }
+
     fun candidateMoves(from: Square) = ChessRules.candidateMoves(position, from)
+
     fun play(move: Move): Boolean {
         val legal = legalMoves().firstOrNull { it == move } ?: return false
         if (currentPly < moves.size) {
             while (moves.size > currentPly) moves.removeLast()
             while (timeline.size > currentPly + 1) timeline.removeLast()
         }
-        val notation = ChessRules.san(position, legal); position = ChessRules.applyMove(position, legal)
-        timeline += position; moves += PlayedMove(legal, notation, position); currentPly++
+        val notation = ChessRules.san(position, legal)
+        position = ChessRules.applyMove(position, legal)
+        timeline += position
+        moves += PlayedMove(legal, notation, position)
+        currentPly++
         return true
     }
 }
