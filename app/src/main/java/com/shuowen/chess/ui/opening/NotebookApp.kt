@@ -163,6 +163,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var reviewMode by remember { mutableStateOf(false) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
     var editNode by remember { mutableStateOf(false) }
+    var confirmDeleteNode by remember { mutableStateOf(false) }
 
     fun refresh(save: Boolean = false, treeChanged: Boolean = false) {
         selected = null
@@ -234,23 +235,6 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             }
             LazyColumn(Modifier.weight(1f)) {
                 item {
-                    NavigationControls(
-                        atRoot = tree.currentNodeId == tree.rootId,
-                        nextCount = tree.children().size,
-                        reviewMode = reviewMode,
-                        onPrevious = { if (tree.back()) refresh() },
-                        onNext = {
-                            tree.children().singleOrNull()?.let { node ->
-                                tree.goTo(node.id)
-                                refresh()
-                            }
-                        },
-                        onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
-                        onCreateBranch = { reviewMode = false; selected = null },
-                    )
-                }
-                item {
-                    Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                     VariationTree(
                         document = document,
                         treeRevision = treeRevision,
@@ -304,6 +288,11 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 tree.currentNode.position.turn == com.shuowen.chess.chess.Color.WHITE
             ) "对方" else "",
             onDismiss = { editNode = false },
+            canDelete = tree.currentNodeId != tree.rootId,
+            onDelete = {
+                editNode = false
+                confirmDeleteNode = true
+            },
             onSave = { name ->
                 tree.currentNode.label = name.trim().takeIf { it.isNotEmpty() }
                 editNode = false
@@ -311,34 +300,20 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             },
         )
     }
-}
-
-@Composable
-private fun NavigationControls(
-    atRoot: Boolean,
-    nextCount: Int,
-    reviewMode: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onUndo: () -> Unit,
-    onCreateBranch: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button(onClick = onPrevious, enabled = !atRoot, modifier = Modifier.weight(1f)) { Text("上一步") }
-            Button(onClick = onNext, enabled = nextCount == 1, modifier = Modifier.weight(1f)) {
-                Text(if (nextCount > 1) "请选择分支" else "下一步")
-            }
-            TextButton(onClick = onUndo, enabled = !atRoot) { Text("撤销") }
-        }
-        if (nextCount > 0) {
-            TextButton(onClick = onCreateBranch, modifier = Modifier.fillMaxWidth()) {
-                Text(if (reviewMode) "从当前位置创建新分支" else "走不同着法即可创建新分支")
-            }
-        }
-        Text(
-            if (reviewMode) "查看模式：选择下方候选着法继续。" else "录入模式：在棋盘走棋；回退不会删除已有棋谱。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    if (confirmDeleteNode) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteNode = false },
+            title = { Text("删除这个分支？") },
+            text = { Text("这个节点以及它后面的所有节点都会被删除，并且无法撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteNode = false
+                    if (tree.undoBranch()) refresh(save = true, treeChanged = true)
+                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteNode = false }) { Text("取消") }
+            },
         )
     }
 }
@@ -450,6 +425,8 @@ private fun NodeNameDialog(
     standardName: String,
     initialName: String,
     onDismiss: () -> Unit,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
     onSave: (String) -> Unit,
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
@@ -472,7 +449,17 @@ private fun NodeNameDialog(
             }
         },
         confirmButton = { TextButton(onClick = { onSave(name) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (canDelete) {
+                    TextButton(onClick = onDelete) {
+                        Text("删除节点", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
     )
 }
 
