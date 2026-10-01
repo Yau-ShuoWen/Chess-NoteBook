@@ -226,7 +226,7 @@ private fun EditorToolbar(
 }
 
 @Composable
-private fun ChessBoard(
+internal fun ChessBoard(
     position: Position,
     selected: Square?,
     legalTargets: Set<Square>,
@@ -373,7 +373,7 @@ private fun PromotionDialog(
     )
 }
 
-private fun statusText(position: Position) = when {
+internal fun statusText(position: Position) = when {
     ChessRules.isCheckmate(position) -> if (position.turn == Color.WHITE) "白方被将死" else "黑方被将死"
     ChessRules.isStalemate(position) -> "和棋：无子可动"
     ChessRules.isInCheck(position, position.turn) -> if (position.turn == Color.WHITE) "白方被将军" else "黑方被将军"
@@ -381,7 +381,7 @@ private fun statusText(position: Position) = when {
     else -> "黑方走棋"
 }
 
-private fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type) {
+internal fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type) {
     Color.WHITE to PieceType.KING -> "♔"
     Color.WHITE to PieceType.QUEEN -> "♕"
     Color.WHITE to PieceType.ROOK -> "♖"
