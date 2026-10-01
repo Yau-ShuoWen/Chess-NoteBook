@@ -5,8 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,7 +45,9 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -341,10 +342,6 @@ private fun VariationTree(
     var viewportSize by remember(document.id) { mutableStateOf(IntSize.Zero) }
     var initiallyPositioned by remember(document.id) { mutableStateOf(false) }
     val density = LocalDensity.current
-    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale = (scale * zoomChange).coerceIn(0.5f, 2.5f)
-        pan += panChange
-    }
     LaunchedEffect(layout, viewportSize) {
         if (!initiallyPositioned && layout.size > 1 && viewportSize != IntSize.Zero) {
             val root = layout.first { it.node.id == tree.rootId }
@@ -387,7 +384,15 @@ private fun VariationTree(
             modifier
                 .clipToBounds()
                 .onSizeChanged { viewportSize = it }
-                .transformable(transformState),
+                .pointerInput(document.id) {
+                    detectTransformGestures { centroid, panChange, zoomChange, _ ->
+                        val oldScale = scale
+                        val newScale = (oldScale * zoomChange).coerceIn(0.5f, 2.5f)
+                        val appliedZoom = newScale / oldScale
+                        pan = centroid + panChange - (centroid - pan) * appliedZoom
+                        scale = newScale
+                    }
+                },
         ) {
             Box(
                 Modifier
@@ -396,6 +401,7 @@ private fun VariationTree(
                     translationY = pan.y
                     scaleX = scale
                     scaleY = scale
+                    transformOrigin = TransformOrigin(0f, 0f)
                 }
                 .width(diagramWidth)
                 .height(diagramHeight),
