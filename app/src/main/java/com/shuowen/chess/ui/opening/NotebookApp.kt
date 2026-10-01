@@ -174,11 +174,10 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     val legalTargets = selected?.let { from ->
         com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
     }.orEmpty()
-    val recordedNextMoves = tree.children()
-    val nextMoveBadges = recordedNextMoves
+    val nextMoveBadges = tree.children()
         .filter { it.move != null }
-        .groupBy { it.move!!.from }
-        .mapValues { (_, nodes) -> nodes.joinToString("/") { it.displayName } }
+        .map { it.move!!.from }
+        .toSet()
 
     Scaffold(
         topBar = {

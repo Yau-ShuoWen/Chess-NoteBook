@@ -239,7 +239,7 @@ internal fun ChessBoard(
     forbiddenTargets: Set<Square>,
     flipped: Boolean,
     showGameStatus: Boolean,
-    moveBadges: Map<Square, String> = emptyMap(),
+    moveBadges: Set<Square> = emptySet(),
     lastMove: Move? = null,
     onSquare: (Square) -> Unit,
 ) {
@@ -297,16 +297,12 @@ internal fun ChessBoard(
                                 fontWeight = FontWeight.Bold,
                             )
                         }
-                        moveBadges[square]?.let { label ->
-                            Text(
-                                text = label,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
+                        if (square in moveBadges) {
+                            Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                    .padding(horizontal = 3.dp, vertical = 1.dp),
+                                    .size(10.dp),
                             )
                         }
                     }
