@@ -202,6 +202,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 flipped = flipped,
                 showGameStatus = true,
                 moveBadges = nextMoveBadges,
+                lastMove = tree.currentNode.move,
             ) { square ->
                 if (reviewMode) return@ChessBoard
                 if (selected == square) {

@@ -2,6 +2,7 @@ package com.shuowen.chess.ui.editor
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -38,7 +39,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as UiColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +54,9 @@ import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.PlayedMove
 import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -234,6 +240,7 @@ internal fun ChessBoard(
     flipped: Boolean,
     showGameStatus: Boolean,
     moveBadges: Map<Square, String> = emptyMap(),
+    lastMove: Move? = null,
     onSquare: (Square) -> Unit,
 ) {
     val ranks = if (flipped) 0..7 else 7 downTo 0
@@ -245,10 +252,11 @@ internal fun ChessBoard(
     }
     val checkmated = checkedKing != null && ChessRules.isCheckmate(position)
 
-    Column(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
-        for (rank in ranks) {
-            Row(Modifier.weight(1f)) {
-                for (file in files) {
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
+        Column(Modifier.fillMaxSize()) {
+            for (rank in ranks) {
+                Row(Modifier.weight(1f)) {
+                    for (file in files) {
                     val square = Square(file, rank)
                     val isLightSquare = (file + rank) % 2 == 0
                     val isCapture = square in legalTargets && position.board[square] != null
@@ -302,7 +310,40 @@ internal fun ChessBoard(
                             )
                         }
                     }
+                    }
                 }
+            }
+        }
+        lastMove?.let { move ->
+            Canvas(Modifier.matchParentSize()) {
+                fun center(square: Square): Offset {
+                    val shownFile = if (flipped) 7 - square.file else square.file
+                    val shownRank = if (flipped) square.rank else 7 - square.rank
+                    return Offset(
+                        x = (shownFile + 0.5f) * size.width / 8f,
+                        y = (shownRank + 0.5f) * size.height / 8f,
+                    )
+                }
+
+                val start = center(move.from)
+                val end = center(move.to)
+                val color = UiColor(0xB34B5563)
+                val stroke = 1.5.dp.toPx()
+                drawLine(color, start, end, strokeWidth = stroke, cap = StrokeCap.Round)
+
+                val angle = atan2(end.y - start.y, end.x - start.x)
+                val headLength = 8.dp.toPx()
+                val spread = 0.48f
+                val left = Offset(
+                    end.x - headLength * cos(angle - spread),
+                    end.y - headLength * sin(angle - spread),
+                )
+                val right = Offset(
+                    end.x - headLength * cos(angle + spread),
+                    end.y - headLength * sin(angle + spread),
+                )
+                drawLine(color, end, left, strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, end, right, strokeWidth = stroke, cap = StrokeCap.Round)
             }
         }
     }
