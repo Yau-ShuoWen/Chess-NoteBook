@@ -396,11 +396,18 @@ private fun VariationTree(
                         childCenterX,
                         childY,
                     )
-                    val middleY = (start.y + end.y) / 2
+                    val verticalHandle = (end.y - start.y) * 0.2f
                     val edgeColor = if (child.node.id in currentPathIds) activeLineColor else lineColor
                     val path = Path().apply {
                         moveTo(start.x, start.y)
-                        cubicTo(start.x, middleY, end.x, middleY, end.x, end.y)
+                        cubicTo(
+                            start.x,
+                            start.y + verticalHandle,
+                            end.x,
+                            end.y - verticalHandle,
+                            end.x,
+                            end.y,
+                        )
                     }
                     drawPath(
                         path = path,
