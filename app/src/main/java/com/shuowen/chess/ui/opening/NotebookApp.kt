@@ -5,7 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,11 +35,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -233,25 +235,21 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     }
                 }
             }
-            LazyColumn(Modifier.weight(1f)) {
-                item {
-                    VariationTree(
-                        document = document,
-                        treeRevision = treeRevision,
-                        currentNodeId = tree.currentNodeId,
-                        onNode = { id ->
-                            tree.goTo(id)
-                            refresh()
-                        },
-                        onEditNode = { id ->
-                            tree.goTo(id)
-                            refresh()
-                            editNode = true
-                        },
-                    )
-                }
-                item { Spacer(Modifier.padding(12.dp)) }
-            }
+            VariationTree(
+                document = document,
+                treeRevision = treeRevision,
+                currentNodeId = tree.currentNodeId,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                onNode = { id ->
+                    tree.goTo(id)
+                    refresh()
+                },
+                onEditNode = { id ->
+                    tree.goTo(id)
+                    refresh()
+                    editNode = true
+                },
+            )
         }
     }
 
@@ -324,15 +322,24 @@ private fun VariationTree(
     document: OpeningDocument,
     treeRevision: Int,
     currentNodeId: String,
+    modifier: Modifier = Modifier,
     onNode: (String) -> Unit,
     onEditNode: (String) -> Unit,
 ) {
     val tree = document.tree
     val layout = remember(document.id, treeRevision) { buildTreeLayout(tree) }
+    var pan by remember(document.id) { mutableStateOf(Offset.Zero) }
     if (layout.size == 1) {
-        Text("走出第一步后，分支会显示在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(modifier, contentAlignment = Alignment.Center) {
+            TreeNodeCard(
+                point = layout.single(),
+                currentNodeId = currentNodeId,
+                currentPathIds = setOf(tree.rootId),
+                onNode = onNode,
+                onEditNode = onEditNode,
+            )
+        }
     } else {
-        val horizontalScroll = rememberScrollState()
         val diagramWidth = layout.maxOf { point ->
             point.row * TREE_COLUMN_WIDTH + TREE_MAX_NODE_WIDTH + TREE_PADDING * 2
         }.dp
@@ -346,12 +353,24 @@ private fun VariationTree(
             (tree.pathTo(currentNodeId).map { it.id } + tree.rootId).toSet()
         }
         Box(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(horizontalScroll)
+            modifier
+                .clipToBounds()
+                .pointerInput(document.id) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        pan += dragAmount
+                    }
+                },
+        ) {
+            Box(
+                Modifier
+                .graphicsLayer {
+                    translationX = pan.x
+                    translationY = pan.y
+                }
                 .width(diagramWidth)
                 .height(diagramHeight),
-        ) {
+            ) {
             Canvas(Modifier.matchParentSize()) {
                 layout.filter { it.parentId != null }.forEach { child ->
                     val parent = pointsById.getValue(child.parentId ?: return@forEach)
@@ -379,43 +398,56 @@ private fun VariationTree(
                 }
             }
             layout.forEach { point ->
-                val isCurrent = point.node.id == currentNodeId
-                val isOnCurrentPath = point.node.id in currentPathIds
-                val displayName = point.node.displayName
-                val width = nodeWidth(displayName)
-                Card(
-                    modifier = Modifier
-                        .offset(
-                            x = (
-                                point.row * TREE_COLUMN_WIDTH + TREE_PADDING +
-                                    (TREE_MAX_NODE_WIDTH - width) / 2f
-                            ).dp,
-                            y = (point.depth * TREE_ROW_HEIGHT + 2).dp,
-                        )
-                        .width(width.dp)
-                        .height(nodeHeight(displayName).dp)
-                        .combinedClickable(
-                            onClick = { onNode(point.node.id) },
-                            onDoubleClick = { onEditNode(point.node.id) },
-                        ),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-                        else if (isOnCurrentPath) MaterialTheme.colorScheme.secondaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                    ),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = displayName,
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                            textAlign = TextAlign.Center,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                        )
-                    }
-                }
+                TreeNodeCard(point, currentNodeId, currentPathIds, onNode, onEditNode)
             }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TreeNodeCard(
+    point: TreePoint,
+    currentNodeId: String,
+    currentPathIds: Set<String>,
+    onNode: (String) -> Unit,
+    onEditNode: (String) -> Unit,
+) {
+    val isCurrent = point.node.id == currentNodeId
+    val isOnCurrentPath = point.node.id in currentPathIds
+    val displayName = point.node.displayName
+    val width = nodeWidth(displayName)
+    Card(
+        modifier = Modifier
+            .offset(
+                x = (
+                    point.row * TREE_COLUMN_WIDTH + TREE_PADDING +
+                        (TREE_MAX_NODE_WIDTH - width) / 2f
+                ).dp,
+                y = (point.depth * TREE_ROW_HEIGHT + 2).dp,
+            )
+            .width(width.dp)
+            .height(nodeHeight(displayName).dp)
+            .combinedClickable(
+                onClick = { onNode(point.node.id) },
+                onDoubleClick = { onEditNode(point.node.id) },
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+            else if (isOnCurrentPath) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = displayName,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+            )
         }
     }
 }
