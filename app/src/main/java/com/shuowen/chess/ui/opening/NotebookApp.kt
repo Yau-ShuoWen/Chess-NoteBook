@@ -182,84 +182,80 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             )
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-            item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(statusText(position), fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
-                    TextButton(onClick = { reviewMode = !reviewMode; selected = null }) {
-                        Text(if (reviewMode) "进入录入" else "进入查看")
-                    }
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(statusText(position), fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
+                TextButton(onClick = { reviewMode = !reviewMode; selected = null }) {
+                    Text(if (reviewMode) "录入" else "查看")
                 }
             }
-            item {
-                Box {
-                    ChessBoard(
-                        position = position,
-                        selected = selected,
-                        legalTargets = if (reviewMode) emptySet() else legalTargets,
-                        forbiddenTargets = emptySet(),
-                        flipped = flipped,
-                        showGameStatus = true,
-                    ) { square ->
-                        if (reviewMode) return@ChessBoard
-                        if (selected == square) {
-                            selected = null
-                        } else if (selected == null) {
-                            if (position.board[square]?.color == position.turn) selected = square
-                        } else {
-                            val candidates = com.shuowen.chess.chess.ChessRules.legalMoves(position)
-                                .filter { it.from == selected && it.to == square }
-                            when {
-                                candidates.size > 1 -> promotionMoves = candidates
-                                candidates.size == 1 -> if (tree.play(candidates.single())) {
-                                    refresh(save = true, treeChanged = true)
-                                }
-                                position.board[square]?.color == position.turn -> selected = square
-                                else -> selected = null
-                            }
+            ChessBoard(
+                position = position,
+                selected = selected,
+                legalTargets = if (reviewMode) emptySet() else legalTargets,
+                forbiddenTargets = emptySet(),
+                flipped = flipped,
+                showGameStatus = true,
+            ) { square ->
+                if (reviewMode) return@ChessBoard
+                if (selected == square) {
+                    selected = null
+                } else if (selected == null) {
+                    if (position.board[square]?.color == position.turn) selected = square
+                } else {
+                    val candidates = com.shuowen.chess.chess.ChessRules.legalMoves(position)
+                        .filter { it.from == selected && it.to == square }
+                    when {
+                        candidates.size > 1 -> promotionMoves = candidates
+                        candidates.size == 1 -> if (tree.play(candidates.single())) {
+                            refresh(save = true, treeChanged = true)
                         }
+                        position.board[square]?.color == position.turn -> selected = square
+                        else -> selected = null
                     }
                 }
             }
-            item {
-                NavigationControls(
-                    atRoot = tree.currentNodeId == tree.rootId,
-                    hasExistingBranches = tree.children().isNotEmpty(),
-                    reviewMode = reviewMode,
-                    onBack = { if (tree.back()) refresh() },
-                    onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
-                    onCreateBranch = { reviewMode = false; selected = null },
-                )
-            }
-            item {
-                CurrentPath(tree.pathTo(), tree.currentNodeId, onNode = { id ->
-                    tree.goTo(id)
-                    refresh()
-                }, onRoot = {
-                    tree.goTo(tree.rootId)
-                    refresh()
-                })
-            }
-            item {
-                NextMoves(tree.children()) { node ->
-                    tree.goTo(node.id)
-                    refresh()
+            LazyColumn(Modifier.weight(1f)) {
+                item {
+                    NavigationControls(
+                        atRoot = tree.currentNodeId == tree.rootId,
+                        hasExistingBranches = tree.children().isNotEmpty(),
+                        reviewMode = reviewMode,
+                        onBack = { if (tree.back()) refresh() },
+                        onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
+                        onCreateBranch = { reviewMode = false; selected = null },
+                    )
                 }
-            }
-            item {
-                Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                VariationTree(
-                    document = document,
-                    treeRevision = treeRevision,
-                    currentNodeId = tree.currentNodeId,
-                ) { id ->
-                    tree.goTo(id)
-                    refresh()
+                item {
+                    CurrentPath(tree.pathTo(), tree.currentNodeId, onNode = { id ->
+                        tree.goTo(id)
+                        refresh()
+                    }, onRoot = {
+                        tree.goTo(tree.rootId)
+                        refresh()
+                    })
                 }
+                item {
+                    NextMoves(tree.children()) { node ->
+                        tree.goTo(node.id)
+                        refresh()
+                    }
+                }
+                item {
+                    Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                    VariationTree(
+                        document = document,
+                        treeRevision = treeRevision,
+                        currentNodeId = tree.currentNodeId,
+                    ) { id ->
+                        tree.goTo(id)
+                        refresh()
+                    }
+                }
+                item { Spacer(Modifier.padding(12.dp)) }
             }
-            item { Spacer(Modifier.padding(12.dp)) }
         }
     }
 
