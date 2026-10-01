@@ -43,6 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -395,9 +398,15 @@ private fun VariationTree(
                     )
                     val middleY = (start.y + end.y) / 2
                     val edgeColor = if (child.node.id in currentPathIds) activeLineColor else lineColor
-                    drawLine(edgeColor, start, Offset(start.x, middleY), strokeWidth = 2.dp.toPx())
-                    drawLine(edgeColor, Offset(start.x, middleY), Offset(end.x, middleY), strokeWidth = 2.dp.toPx())
-                    drawLine(edgeColor, Offset(end.x, middleY), end, strokeWidth = 2.dp.toPx())
+                    val path = Path().apply {
+                        moveTo(start.x, start.y)
+                        cubicTo(start.x, middleY, end.x, middleY, end.x, end.y)
+                    }
+                    drawPath(
+                        path = path,
+                        color = edgeColor,
+                        style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
+                    )
                 }
             }
             layout.forEach { point ->
@@ -519,20 +528,41 @@ private data class TreePoint(
 )
 
 private fun buildTreeLayout(tree: com.shuowen.chess.opening.OpeningTree): List<TreePoint> {
-    val levels = mutableListOf<MutableList<OpeningNode>>()
+    val raw = mutableListOf<TreePoint>()
+    var nextLeafRow = 0f
 
-    fun collect(node: OpeningNode, depth: Int) {
-        while (levels.size <= depth) levels += mutableListOf<OpeningNode>()
-        levels[depth] += node
-        tree.children(node.id).forEach { child -> collect(child, depth + 1) }
+    fun place(node: OpeningNode, depth: Int): Float {
+        val children = tree.children(node.id)
+        val row = if (children.isEmpty()) {
+            nextLeafRow.also { nextLeafRow += 1f }
+        } else {
+            val childRows = children.map { child -> place(child, depth + 1) }
+            (childRows.first() + childRows.last()) / 2f
+        }
+        raw += TreePoint(node, node.parentId, depth, row)
+        return row
     }
 
-    collect(tree.node(tree.rootId)!!, 0)
-    val widestLevel = levels.maxOf { it.size }
-    return levels.flatMapIndexed { depth, nodes ->
-        val leadingSpace = (widestLevel - nodes.size) / 2f
-        nodes.mapIndexed { index, node ->
-            TreePoint(node, node.parentId, depth, leadingSpace + index)
+    val rootRow = place(tree.node(tree.rootId)!!, 0)
+    val maxDepth = raw.maxOf { it.depth }.coerceAtLeast(1)
+    return raw.groupBy { it.depth }.values.flatMap { level ->
+        val depthRatio = level.first().depth.toFloat() / maxDepth
+        val compression = 0.35f + 0.65f * depthRatio
+        val ordered = level.sortedBy { it.row }
+        val desired = ordered.map { rootRow + (it.row - rootRow) * compression }
+        val compactRows = mutableListOf<Float>()
+        desired.forEachIndexed { index, row ->
+            if (index == 0) {
+                compactRows += row
+            } else {
+                val desiredGap = row - desired[index - 1]
+                val gap = desiredGap.coerceIn(1f, 1.65f)
+                compactRows += compactRows.last() + gap
+            }
+        }
+        val shift = desired.average().toFloat() - compactRows.average().toFloat()
+        ordered.mapIndexed { index, point ->
+            point.copy(row = compactRows[index] + shift)
         }
     }
 }
