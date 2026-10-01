@@ -3,6 +3,8 @@ package com.shuowen.chess.ui.opening
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -239,7 +241,6 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                         },
                         onUndo = { if (tree.undoBranch()) refresh(save = true, treeChanged = true) },
                         onCreateBranch = { reviewMode = false; selected = null },
-                        onEditNode = { editNode = true },
                     )
                 }
                 item {
@@ -248,10 +249,16 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                         document = document,
                         treeRevision = treeRevision,
                         currentNodeId = tree.currentNodeId,
-                    ) { id ->
-                        tree.goTo(id)
-                        refresh()
-                    }
+                        onNode = { id ->
+                            tree.goTo(id)
+                            refresh()
+                        },
+                        onEditNode = { id ->
+                            tree.goTo(id)
+                            refresh()
+                            editNode = true
+                        },
+                    )
                 }
                 item { Spacer(Modifier.padding(12.dp)) }
             }
@@ -306,7 +313,6 @@ private fun NavigationControls(
     onNext: () -> Unit,
     onUndo: () -> Unit,
     onCreateBranch: () -> Unit,
-    onEditNode: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -321,7 +327,6 @@ private fun NavigationControls(
                 Text(if (reviewMode) "从当前位置创建新分支" else "走不同着法即可创建新分支")
             }
         }
-        TextButton(onClick = onEditNode, modifier = Modifier.align(Alignment.End)) { Text("编辑节点") }
         Text(
             if (reviewMode) "查看模式：选择下方候选着法继续。" else "录入模式：在棋盘走棋；回退不会删除已有棋谱。",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -329,12 +334,14 @@ private fun NavigationControls(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VariationTree(
     document: OpeningDocument,
     treeRevision: Int,
     currentNodeId: String,
     onNode: (String) -> Unit,
+    onEditNode: (String) -> Unit,
 ) {
     val tree = document.tree
     val layout = remember(document.id, treeRevision) { buildTreeLayout(tree) }
@@ -379,7 +386,10 @@ private fun VariationTree(
                         .offset(x = (point.row * 96 + 4).dp, y = (point.depth * 64 + 2).dp)
                         .width(76.dp)
                         .height(36.dp)
-                        .clickable { onNode(point.node.id) },
+                        .combinedClickable(
+                            onClick = { onNode(point.node.id) },
+                            onDoubleClick = { onEditNode(point.node.id) },
+                        ),
                     colors = CardDefaults.cardColors(
                         containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
                         else if (isOnCurrentPath) MaterialTheme.colorScheme.secondaryContainer
