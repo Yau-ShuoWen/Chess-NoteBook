@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
@@ -351,10 +353,12 @@ private fun VariationTree(
         Text("走出第一步后，分支会显示在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         val horizontalScroll = rememberScrollState()
-        val maxDepth = layout.maxOf { it.depth }
-        val maxRow = layout.maxOf { it.row }
-        val diagramWidth = (maxRow * 96 + 88).dp
-        val diagramHeight = (maxDepth * 64 + 44).dp
+        val diagramWidth = layout.maxOf { point ->
+            point.row * TREE_COLUMN_WIDTH + nodeWidth(point.node.displayName) + TREE_PADDING * 2
+        }.dp
+        val diagramHeight = layout.maxOf { point ->
+            point.depth * TREE_ROW_HEIGHT + nodeHeight(point.node.displayName) + 6
+        }.dp
         val lineColor = MaterialTheme.colorScheme.outline
         val activeLineColor = MaterialTheme.colorScheme.primary
         val pointsById = remember(layout) { layout.associateBy { it.node.id } }
@@ -371,8 +375,18 @@ private fun VariationTree(
             Canvas(Modifier.matchParentSize()) {
                 layout.filter { it.parentId != null }.forEach { child ->
                     val parent = pointsById.getValue(child.parentId ?: return@forEach)
-                    val start = Offset(parent.row * 96.dp.toPx() + 42.dp.toPx(), parent.depth * 64.dp.toPx() + 38.dp.toPx())
-                    val end = Offset(child.row * 96.dp.toPx() + 42.dp.toPx(), child.depth * 64.dp.toPx() + 2.dp.toPx())
+                    val parentX = (parent.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp.toPx()
+                    val parentY = (parent.depth * TREE_ROW_HEIGHT + 2).dp.toPx()
+                    val childX = (child.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp.toPx()
+                    val childY = (child.depth * TREE_ROW_HEIGHT + 2).dp.toPx()
+                    val start = Offset(
+                        parentX + nodeWidth(parent.node.displayName).dp.toPx() / 2,
+                        parentY + nodeHeight(parent.node.displayName).dp.toPx(),
+                    )
+                    val end = Offset(
+                        childX + nodeWidth(child.node.displayName).dp.toPx() / 2,
+                        childY,
+                    )
                     val middleY = (start.y + end.y) / 2
                     val edgeColor = if (child.node.id in currentPathIds) activeLineColor else lineColor
                     drawLine(edgeColor, start, Offset(start.x, middleY), strokeWidth = 2.dp.toPx())
@@ -383,11 +397,15 @@ private fun VariationTree(
             layout.forEach { point ->
                 val isCurrent = point.node.id == currentNodeId
                 val isOnCurrentPath = point.node.id in currentPathIds
+                val displayName = point.node.displayName
                 Card(
                     modifier = Modifier
-                        .offset(x = (point.row * 96 + 4).dp, y = (point.depth * 64 + 2).dp)
-                        .width(76.dp)
-                        .height(36.dp)
+                        .offset(
+                            x = (point.row * TREE_COLUMN_WIDTH + TREE_PADDING).dp,
+                            y = (point.depth * TREE_ROW_HEIGHT + 2).dp,
+                        )
+                        .width(nodeWidth(displayName).dp)
+                        .height(nodeHeight(displayName).dp)
                         .combinedClickable(
                             onClick = { onNode(point.node.id) },
                             onDoubleClick = { onEditNode(point.node.id) },
@@ -400,8 +418,12 @@ private fun VariationTree(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = point.node.displayName,
+                            text = displayName,
                             fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                         )
                     }
                 }
@@ -439,6 +461,18 @@ private fun NodeNameDialog(
         confirmButton = { TextButton(onClick = { onSave(name) }) { Text("保存") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+private const val TREE_COLUMN_WIDTH = 172
+private const val TREE_ROW_HEIGHT = 88
+private const val TREE_PADDING = 8
+
+private fun nodeWidth(name: String): Int = (name.length * 15 + 24).coerceIn(76, 156)
+
+private fun nodeHeight(name: String): Int = when {
+    name.length <= 8 -> 36
+    name.length <= 18 -> 54
+    else -> 72
 }
 
 private data class TreePoint(
