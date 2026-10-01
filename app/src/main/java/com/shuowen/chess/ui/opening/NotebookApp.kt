@@ -152,10 +152,10 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var reviewMode by remember { mutableStateOf(false) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
 
-    fun changed() {
+    fun refresh(save: Boolean = false) {
         selected = null
         revision++
-        onSave()
+        if (save) onSave()
     }
 
     BackHandler(onBack = onBack)
@@ -204,7 +204,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                                 .filter { it.from == selected && it.to == square }
                             when {
                                 candidates.size > 1 -> promotionMoves = candidates
-                                candidates.size == 1 -> if (tree.play(candidates.single())) changed()
+                                candidates.size == 1 -> if (tree.play(candidates.single())) refresh(save = true)
                                 position.board[square]?.color == position.turn -> selected = square
                                 else -> selected = null
                             }
@@ -217,31 +217,31 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     atRoot = tree.currentNodeId == tree.rootId,
                     hasExistingBranches = tree.children().isNotEmpty(),
                     reviewMode = reviewMode,
-                    onBack = { if (tree.back()) changed() },
-                    onUndo = { if (tree.undoBranch()) changed() },
+                    onBack = { if (tree.back()) refresh() },
+                    onUndo = { if (tree.undoBranch()) refresh(save = true) },
                     onCreateBranch = { reviewMode = false; selected = null },
                 )
             }
             item {
                 CurrentPath(tree.pathTo(), tree.currentNodeId, onNode = { id ->
                     tree.goTo(id)
-                    changed()
+                    refresh()
                 }, onRoot = {
                     tree.goTo(tree.rootId)
-                    changed()
+                    refresh()
                 })
             }
             item {
                 NextMoves(tree.children()) { node ->
                     tree.goTo(node.id)
-                    changed()
+                    refresh()
                 }
             }
             item {
                 Text("分支树", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                 VariationTree(document, revision) { id ->
                     tree.goTo(id)
-                    changed()
+                    refresh()
                 }
             }
             item { Spacer(Modifier.padding(12.dp)) }
@@ -254,7 +254,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             turn = position.turn,
             onDismiss = { promotionMoves = emptyList() },
             onSelect = { move ->
-                if (tree.play(move)) changed()
+                if (tree.play(move)) refresh(save = true)
                 promotionMoves = emptyList()
             },
         )
