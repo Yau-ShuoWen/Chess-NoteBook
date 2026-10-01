@@ -5,7 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -329,6 +330,11 @@ private fun VariationTree(
     val tree = document.tree
     val layout = remember(document.id, treeRevision) { buildTreeLayout(tree) }
     var pan by remember(document.id) { mutableStateOf(Offset.Zero) }
+    var scale by remember(document.id) { mutableFloatStateOf(1f) }
+    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        scale = (scale * zoomChange).coerceIn(0.5f, 2.5f)
+        pan += panChange
+    }
     if (layout.size == 1) {
         Box(modifier, contentAlignment = Alignment.Center) {
             TreeNodeCard(
@@ -355,18 +361,15 @@ private fun VariationTree(
         Box(
             modifier
                 .clipToBounds()
-                .pointerInput(document.id) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        pan += dragAmount
-                    }
-                },
+                .transformable(transformState),
         ) {
             Box(
                 Modifier
                 .graphicsLayer {
                     translationX = pan.x
                     translationY = pan.y
+                    scaleX = scale
+                    scaleY = scale
                 }
                 .width(diagramWidth)
                 .height(diagramHeight),
