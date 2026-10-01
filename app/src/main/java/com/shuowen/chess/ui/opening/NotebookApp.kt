@@ -2,6 +2,8 @@ package com.shuowen.chess.ui.opening
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +22,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -30,9 +35,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -331,36 +338,84 @@ private fun NextMoves(nodes: List<OpeningNode>, onNode: (OpeningNode) -> Unit) {
 @Composable
 private fun VariationTree(document: OpeningDocument, revision: Int, onNode: (String) -> Unit) {
     val tree = document.tree
-    val rows = remember(document.id, revision) {
-        buildList {
-            fun visit(parentId: String, depth: Int) {
-                tree.children(parentId).forEach { child ->
-                    add(depth to child)
-                    visit(child.id, depth + 1)
-                }
-            }
-            visit(tree.rootId, 0)
-        }
-    }
-    if (rows.isEmpty()) {
+    val layout = remember(document.id, revision) { buildTreeLayout(tree) }
+    if (layout.size == 1) {
         Text("走出第一步后，分支会显示在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            rows.forEach { (depth, node) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { onNode(node.id) }.padding(vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+        val horizontalScroll = rememberScrollState()
+        val maxDepth = layout.maxOf { it.depth }
+        val maxRow = layout.maxOf { it.row }
+        val diagramWidth = (maxDepth * 116 + 92).dp
+        val diagramHeight = (maxRow * 56 + 48).dp
+        val lineColor = MaterialTheme.colorScheme.outline
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(horizontalScroll)
+                .width(diagramWidth)
+                .height(diagramHeight),
+        ) {
+            Canvas(Modifier.matchParentSize()) {
+                layout.filter { it.parentId != null }.forEach { child ->
+                    val parent = layout.first { it.node.id == child.parentId }
+                    val start = Offset(parent.depth * 116.dp.toPx() + 84.dp.toPx(), parent.row * 56.dp.toPx() + 20.dp.toPx())
+                    val end = Offset(child.depth * 116.dp.toPx() + 8.dp.toPx(), child.row * 56.dp.toPx() + 20.dp.toPx())
+                    val middleX = (start.x + end.x) / 2
+                    drawLine(lineColor, start, Offset(middleX, start.y), strokeWidth = 2.dp.toPx())
+                    drawLine(lineColor, Offset(middleX, start.y), Offset(middleX, end.y), strokeWidth = 2.dp.toPx())
+                    drawLine(lineColor, Offset(middleX, end.y), end, strokeWidth = 2.dp.toPx())
+                }
+            }
+            layout.forEach { point ->
+                val isCurrent = point.node.id == tree.currentNodeId
+                Card(
+                    modifier = Modifier
+                        .offset(x = (point.depth * 116 + 8).dp, y = (point.row * 56 + 2).dp)
+                        .width(76.dp)
+                        .height(36.dp)
+                        .clickable { onNode(point.node.id) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    ),
                 ) {
-                    Spacer(Modifier.width((depth * 18).dp))
-                    Text(if (depth == 0) "├ " else "└ ", color = MaterialTheme.colorScheme.outline)
-                    Text(node.notation.orEmpty(), fontWeight = if (node.id == tree.currentNodeId) FontWeight.Bold else FontWeight.Normal)
-                    if (node.children.size > 1) {
-                        Text("  ${node.children.size} 个分支", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = point.node.notation ?: "起始",
+                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+private data class TreePoint(
+    val node: OpeningNode,
+    val parentId: String?,
+    val depth: Int,
+    val row: Float,
+)
+
+private fun buildTreeLayout(tree: com.shuowen.chess.opening.OpeningTree): List<TreePoint> {
+    val result = mutableListOf<TreePoint>()
+    var nextLeafRow = 0f
+
+    fun place(node: OpeningNode, depth: Int): Float {
+        val children = tree.children(node.id)
+        val row = if (children.isEmpty()) {
+            nextLeafRow.also { nextLeafRow += 1f }
+        } else {
+            val childRows = children.map { place(it, depth + 1) }
+            (childRows.first() + childRows.last()) / 2f
+        }
+        result += TreePoint(node, node.parentId, depth, row)
+        return row
+    }
+
+    place(tree.node(tree.rootId)!!, 0)
+    return result
 }
 
 @Composable
