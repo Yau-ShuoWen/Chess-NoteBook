@@ -327,12 +327,12 @@ internal fun ChessBoard(
 
                 val start = center(move.from)
                 val end = center(move.to)
-                val color = UiColor(0xB34B5563)
-                val stroke = 1.5.dp.toPx()
+                val color = UiColor(0xE6E53935)
+                val stroke = 2.5.dp.toPx()
                 drawLine(color, start, end, strokeWidth = stroke, cap = StrokeCap.Round)
 
                 val angle = atan2(end.y - start.y, end.x - start.x)
-                val headLength = 8.dp.toPx()
+                val headLength = 10.dp.toPx()
                 val spread = 0.48f
                 val left = Offset(
                     end.x - headLength * cos(angle - spread),
