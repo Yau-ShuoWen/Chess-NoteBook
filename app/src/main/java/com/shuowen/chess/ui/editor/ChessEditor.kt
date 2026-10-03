@@ -2,6 +2,7 @@ package com.shuowen.chess.ui.editor
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -38,9 +39,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as UiColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.shuowen.chess.chess.ChessGame
 import com.shuowen.chess.chess.ChessRules
@@ -51,6 +55,9 @@ import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.PlayedMove
 import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -226,13 +233,16 @@ private fun EditorToolbar(
 }
 
 @Composable
-private fun ChessBoard(
+internal fun ChessBoard(
     position: Position,
     selected: Square?,
     legalTargets: Set<Square>,
     forbiddenTargets: Set<Square>,
     flipped: Boolean,
     showGameStatus: Boolean,
+    possibleMoves: List<Move> = emptyList(),
+    lastMove: Move? = null,
+    verticalPadding: Dp = 8.dp,
     onSquare: (Square) -> Unit,
 ) {
     val ranks = if (flipped) 0..7 else 7 downTo 0
@@ -244,10 +254,11 @@ private fun ChessBoard(
     }
     val checkmated = checkedKing != null && ChessRules.isCheckmate(position)
 
-    Column(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = 8.dp)) {
-        for (rank in ranks) {
-            Row(Modifier.weight(1f)) {
-                for (file in files) {
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = verticalPadding)) {
+        Column(Modifier.fillMaxSize()) {
+            for (rank in ranks) {
+                Row(Modifier.weight(1f)) {
+                    for (file in files) {
                     val square = Square(file, rank)
                     val isLightSquare = (file + rank) % 2 == 0
                     val isCapture = square in legalTargets && position.board[square] != null
@@ -289,6 +300,46 @@ private fun ChessBoard(
                             )
                         }
                     }
+                    }
+                }
+            }
+        }
+        if (possibleMoves.isNotEmpty() || lastMove != null) {
+            Canvas(Modifier.matchParentSize()) {
+                fun center(square: Square): Offset {
+                    val shownFile = if (flipped) 7 - square.file else square.file
+                    val shownRank = if (flipped) square.rank else 7 - square.rank
+                    return Offset(
+                        x = (shownFile + 0.5f) * size.width / 8f,
+                        y = (shownRank + 0.5f) * size.height / 8f,
+                    )
+                }
+
+                fun drawMoveArrow(move: Move, color: UiColor, stroke: Float) {
+                    val start = center(move.from)
+                    val end = center(move.to)
+                    drawLine(color, start, end, strokeWidth = stroke, cap = StrokeCap.Round)
+
+                    val angle = atan2(end.y - start.y, end.x - start.x)
+                    val headLength = 10.dp.toPx()
+                    val spread = 0.48f
+                    val left = Offset(
+                        end.x - headLength * cos(angle - spread),
+                        end.y - headLength * sin(angle - spread),
+                    )
+                    val right = Offset(
+                        end.x - headLength * cos(angle + spread),
+                        end.y - headLength * sin(angle + spread),
+                    )
+                    drawLine(color, end, left, strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(color, end, right, strokeWidth = stroke, cap = StrokeCap.Round)
+                }
+
+                possibleMoves.forEach { move ->
+                    drawMoveArrow(move, UiColor(0xE600A86B), 2.5.dp.toPx())
+                }
+                lastMove?.let { move ->
+                    drawMoveArrow(move, UiColor(0xE6E53935), 2.5.dp.toPx())
                 }
             }
         }
@@ -373,7 +424,7 @@ private fun PromotionDialog(
     )
 }
 
-private fun statusText(position: Position) = when {
+internal fun statusText(position: Position) = when {
     ChessRules.isCheckmate(position) -> if (position.turn == Color.WHITE) "白方被将死" else "黑方被将死"
     ChessRules.isStalemate(position) -> "和棋：无子可动"
     ChessRules.isInCheck(position, position.turn) -> if (position.turn == Color.WHITE) "白方被将军" else "黑方被将军"
@@ -381,7 +432,7 @@ private fun statusText(position: Position) = when {
     else -> "黑方走棋"
 }
 
-private fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type) {
+internal fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type) {
     Color.WHITE to PieceType.KING -> "♔"
     Color.WHITE to PieceType.QUEEN -> "♕"
     Color.WHITE to PieceType.ROOK -> "♖"
