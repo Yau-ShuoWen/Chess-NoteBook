@@ -181,7 +181,14 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
                 actions = {
                     TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
-                    TextButton(onClick = { reviewMode = !reviewMode; selected = null }) {
+                    TextButton(onClick = {
+                        reviewMode = !reviewMode
+                        selected = null
+                        if (reviewMode) {
+                            tree.goTo(tree.rootId)
+                            refresh()
+                        }
+                    }) {
                         Text(if (reviewMode) "录入" else "查看")
                     }
                     TextButton(onClick = { editMetadata = true }) { Text("信息") }
@@ -219,21 +226,33 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     }
                 }
             }
-            VariationTree(
-                document = document,
-                treeRevision = treeRevision,
-                currentNodeId = tree.currentNodeId,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                onNode = { id ->
-                    tree.goTo(id)
-                    refresh()
-                },
-                onEditNode = { id ->
-                    tree.goTo(id)
-                    refresh()
-                    editNode = true
-                },
-            )
+            if (reviewMode) {
+                ReviewNavigator(
+                    tree = tree,
+                    currentNodeId = tree.currentNodeId,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    onNode = { id ->
+                        tree.goTo(id)
+                        refresh()
+                    },
+                )
+            } else {
+                VariationTree(
+                    document = document,
+                    treeRevision = treeRevision,
+                    currentNodeId = tree.currentNodeId,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    onNode = { id ->
+                        tree.goTo(id)
+                        refresh()
+                    },
+                    onEditNode = { id ->
+                        tree.goTo(id)
+                        refresh()
+                        editNode = true
+                    },
+                )
+            }
         }
     }
 
