@@ -30,6 +30,7 @@ class OpeningRepository(context: Context) {
         put("description", document.description)
         put("current", document.tree.currentNodeId)
         document.tree.node(document.tree.rootId)?.label?.let { put("rootLabel", it) }
+        document.tree.node(document.tree.rootId)?.analysis?.let { put("rootAnalysis", it) }
         put("nodes", JSONArray().apply {
             document.tree.allNodes().filter { it.move != null }.forEach { node ->
                 put(JSONObject().apply {
@@ -43,6 +44,7 @@ class OpeningRepository(context: Context) {
                     put("enPassant", node.move.isEnPassant)
                     put("castle", node.move.isCastle)
                     node.label?.let { put("label", it) }
+                    node.analysis?.let { put("analysis", it) }
                 })
             }
         })
@@ -51,6 +53,7 @@ class OpeningRepository(context: Context) {
     private fun decodeDocument(json: JSONObject): OpeningDocument {
         val tree = OpeningTree()
         tree.node(tree.rootId)?.label = json.optString("rootLabel").takeIf { it.isNotBlank() }
+        tree.node(tree.rootId)?.analysis = json.optString("rootAnalysis").takeIf { it.isNotBlank() }
         val idMap = mutableMapOf<String, String>()
         val nodes = json.getJSONArray("nodes")
         for (index in 0 until nodes.length()) {
@@ -69,6 +72,7 @@ class OpeningRepository(context: Context) {
             )
             if (tree.play(move)) {
                 tree.currentNode.label = node.optString("label").takeIf { it.isNotBlank() }
+                tree.currentNode.analysis = node.optString("analysis").takeIf { it.isNotBlank() }
                 idMap[node.getString("id")] = tree.currentNodeId
             }
         }

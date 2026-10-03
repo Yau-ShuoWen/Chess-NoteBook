@@ -13,6 +13,7 @@ data class OpeningNode(
     val position: Position,
     val children: MutableList<String> = mutableListOf(),
     var label: String? = null,
+    var analysis: String? = null,
 )
 
 val OpeningNode.displayName: String get() = label ?: notation ?: "起始"

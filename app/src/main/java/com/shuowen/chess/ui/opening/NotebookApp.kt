@@ -24,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -294,14 +295,16 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 tree.currentNode.move != null &&
                 tree.currentNode.position.turn == com.shuowen.chess.chess.Color.WHITE
             ) "对方" else "",
+            initialAnalysis = tree.currentNode.analysis.orEmpty(),
             onDismiss = { editNode = false },
             canDelete = tree.currentNodeId != tree.rootId,
             onDelete = {
                 editNode = false
                 confirmDeleteNode = true
             },
-            onSave = { name ->
+            onSave = { name, analysis ->
                 tree.currentNode.label = name.trim().takeIf { it.isNotEmpty() }
+                tree.currentNode.analysis = analysis.trim().takeIf { it.isNotEmpty() }
                 editNode = false
                 refresh(save = true, treeChanged = true)
             },
@@ -372,7 +375,7 @@ private fun VariationTree(
             point.row * TREE_COLUMN_WIDTH + TREE_MAX_NODE_WIDTH + TREE_PADDING * 2
         }.dp
         val diagramHeight = layout.maxOf { point ->
-            point.depth * TREE_ROW_HEIGHT + nodeHeight(point.node.displayName) + 6
+            point.depth * TREE_ROW_HEIGHT + nodeHeight(point.node) + 6
         }.dp
         val lineColor = MaterialTheme.colorScheme.outline
         val activeLineColor = MaterialTheme.colorScheme.primary
@@ -419,7 +422,7 @@ private fun VariationTree(
                     val childY = (child.depth * TREE_ROW_HEIGHT + 2).dp.toPx()
                     val start = Offset(
                         parentCenterX,
-                        parentY + nodeHeight(parent.node.displayName).dp.toPx(),
+                        parentY + nodeHeight(parent.node).dp.toPx(),
                     )
                     val end = Offset(
                         childCenterX,
@@ -465,7 +468,7 @@ private fun TreeNodeCard(
     val isCurrent = point.node.id == currentNodeId
     val isOnCurrentPath = point.node.id in currentPathIds
     val displayName = point.node.displayName
-    val width = nodeWidth(displayName)
+    val width = nodeWidth(point.node)
     Card(
         modifier = Modifier
             .offset(
@@ -476,7 +479,7 @@ private fun TreeNodeCard(
                 y = (point.depth * TREE_ROW_HEIGHT + 2).dp,
             )
             .width(width.dp)
-            .height(nodeHeight(displayName).dp)
+            .height(nodeHeight(point.node).dp)
             .combinedClickable(
                 onClick = { onNode(point.node.id) },
                 onDoubleClick = { onEditNode(point.node.id) },
@@ -487,15 +490,26 @@ private fun TreeNodeCard(
             else MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = displayName,
                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
-                maxLines = 3,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 7.dp),
             )
+            point.node.analysis?.let { analysis ->
+                HorizontalDivider(Modifier.fillMaxWidth(), thickness = 1.dp)
+                Text(
+                    text = analysis,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Start,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
         }
     }
 }
@@ -504,12 +518,14 @@ private fun TreeNodeCard(
 private fun NodeNameDialog(
     standardName: String,
     initialName: String,
+    initialAnalysis: String,
     onDismiss: () -> Unit,
     canDelete: Boolean,
     onDelete: () -> Unit,
-    onSave: (String) -> Unit,
+    onSave: (String, String) -> Unit,
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
+    var analysis by remember(initialAnalysis) { mutableStateOf(initialAnalysis) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("编辑节点") },
@@ -526,9 +542,17 @@ private fun NodeNameDialog(
                     "填写名称后只显示自定义名称；清空则恢复显示 $standardName。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = analysis,
+                    onValueChange = { analysis = it },
+                    label = { Text("分析（可选）") },
+                    minLines = 3,
+                    maxLines = 5,
+                )
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(name) }) { Text("保存") } },
+        confirmButton = { TextButton(onClick = { onSave(name, analysis) }) { Text("保存") } },
         dismissButton = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (canDelete) {
@@ -544,16 +568,23 @@ private fun NodeNameDialog(
 }
 
 private const val TREE_COLUMN_WIDTH = 172
-private const val TREE_ROW_HEIGHT = 88
+private const val TREE_ROW_HEIGHT = 124
 private const val TREE_PADDING = 8
 private const val TREE_MAX_NODE_WIDTH = 156
 
-private fun nodeWidth(name: String): Int = (name.length * 15 + 24).coerceIn(76, TREE_MAX_NODE_WIDTH)
+private fun nodeWidth(node: OpeningNode): Int {
+    val contentLength = maxOf(
+        node.displayName.length,
+        node.analysis?.lineSequence()?.maxOfOrNull { it.length } ?: 0,
+    )
+    return (contentLength * 15 + 24).coerceIn(76, TREE_MAX_NODE_WIDTH)
+}
 
-private fun nodeHeight(name: String): Int = when {
-    name.length <= 8 -> 36
-    name.length <= 18 -> 54
-    else -> 72
+private fun nodeHeight(node: OpeningNode): Int {
+    val nameLines = ((node.displayName.length + 9) / 10).coerceIn(1, 2)
+    val analysis = node.analysis ?: return (nameLines * 18 + 12).coerceAtLeast(36)
+    val analysisLines = ((analysis.length + 14) / 15).coerceIn(1, 3)
+    return 12 + nameLines * 18 + 1 + analysisLines * 16 + 8
 }
 
 private data class TreePoint(
