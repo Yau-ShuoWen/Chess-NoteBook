@@ -582,9 +582,9 @@ private fun nodeWidth(node: OpeningNode): Int {
 
 private fun nodeHeight(node: OpeningNode): Int {
     val nameLines = ((node.displayName.length + 9) / 10).coerceIn(1, 2)
-    val analysis = node.analysis ?: return (nameLines * 18 + 12).coerceAtLeast(36)
+    val analysis = node.analysis ?: return (nameLines * 20 + 14).coerceAtLeast(36)
     val analysisLines = ((analysis.length + 14) / 15).coerceIn(1, 3)
-    return 12 + nameLines * 18 + 1 + analysisLines * 16 + 8
+    return 27 + nameLines * 20 + analysisLines * 17
 }
 
 private data class TreePoint(
