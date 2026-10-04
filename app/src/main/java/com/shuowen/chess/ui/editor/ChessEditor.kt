@@ -25,16 +25,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -70,7 +63,6 @@ import com.shuowen.chess.chess.Color
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
-import com.shuowen.chess.chess.PlayedMove
 import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.ui.appearance.LocalChessAppearance
@@ -88,15 +80,9 @@ fun ChessEditor() {
     var revision by remember { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<Square?>(null) }
     var promotionMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
-    var setupMode by remember { mutableStateOf(false) }
-    var setupBoard by remember { mutableStateOf(game.position.board) }
-    var setupPiece by remember { mutableStateOf<Piece?>(Piece(Color.WHITE, PieceType.PAWN)) }
-    var setupTurn by remember { mutableStateOf(Color.WHITE) }
-    var setupError by remember { mutableStateOf<String?>(null) }
     var boardFlipped by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
     var animationStartPosition by remember { mutableStateOf<Position?>(null) }
-    var animationStartHistory by remember { mutableStateOf<List<PlayedMove>?>(null) }
     var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
@@ -105,10 +91,9 @@ fun ChessEditor() {
     val legalTargets = selected?.let { game.legalMoves(it).map(Move::to).toSet() }.orEmpty()
     val candidateTargets = selected?.let { game.candidateMoves(it).map(Move::to).toSet() }.orEmpty()
     val forbiddenTargets = candidateTargets - legalTargets
-    val history = remember(revision) { game.history.toList() }
     val outsideTapSource = remember { MutableInteractionSource() }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("国际象棋笔记") }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("模拟棋局") }) }) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -119,47 +104,25 @@ fun ChessEditor() {
         ) {
             EditorToolbar(
                 position = animationStartPosition ?: position,
-                setupMode = setupMode,
                 enabled = animationStartPosition == null,
                 onFlip = {
                     boardFlipped = !boardFlipped
                     selected = null
                 },
-                onToggleSetup = {
-                    if (setupMode) {
-                        val validation = ChessRules.validateSetup(setupBoard)
-                        if (validation.isValid) {
-                            game.replacePosition(setupBoard, setupTurn)
-                            revision++
-                            setupMode = false
-                            setupError = null
-                        } else {
-                            setupError = validation.errors.joinToString("\n")
-                        }
-                    } else {
-                        setupBoard = position.board
-                        setupTurn = position.turn
-                        setupMode = true
-                        setupError = null
-                    }
-                    selected = null
-                },
                 onNewGame = {
                     game.reset()
-                    setupBoard = game.position.board
                     selected = null
-                    setupMode = false
                     revision++
                 },
             )
 
             ChessBoard(
-                position = if (setupMode) position.copy(board = setupBoard) else position,
+                position = position,
                 selected = selected,
-                legalTargets = if (setupMode) emptySet() else legalTargets,
-                forbiddenTargets = if (setupMode) emptySet() else forbiddenTargets,
+                legalTargets = legalTargets,
+                forbiddenTargets = forbiddenTargets,
                 flipped = boardFlipped,
-                showGameStatus = !setupMode,
+                showGameStatus = true,
                 animatedMove = animatedMove,
                 animationStartPosition = animationStartPosition,
                 moveAnimationKey = moveAnimationKey,
@@ -167,15 +130,9 @@ fun ChessEditor() {
                     if (vibrateWhenAnimationFinishes) vibrateCapture(context)
                     vibrateWhenAnimationFinishes = false
                     animationStartPosition = null
-                    animationStartHistory = null
                 },
             ) { square ->
-                if (setupMode) {
-                    setupBoard = setupBoard.toMutableMap().apply {
-                        if (setupPiece == null) remove(square) else put(square, setupPiece!!)
-                    }
-                    setupError = null
-                } else if (selected == square) {
+                if (selected == square) {
                     selected = null
                 } else if (selected == null) {
                     if (position.board[square]?.color == position.turn) selected = square
@@ -189,7 +146,6 @@ fun ChessEditor() {
                             if (game.play(move)) {
                                 vibrateWhenAnimationFinishes = isCapture
                                 animationStartPosition = position
-                                animationStartHistory = history
                                 animatedMove = move
                                 moveAnimationKey++
                                 selected = null
@@ -202,56 +158,9 @@ fun ChessEditor() {
                 }
             }
 
-            if (setupMode) {
-                setupError?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    )
-                }
-                SetupControls(
-                    selected = setupPiece,
-                    turn = setupTurn,
-                    onPiece = { setupPiece = it },
-                    onTurn = { setupTurn = it },
-                    onClear = {
-                        setupBoard = emptyMap()
-                        setupError = null
-                    },
-                    onStandard = {
-                        setupBoard = Position.initial().board
-                        setupError = null
-                    },
-                )
-            } else {
-                MoveHistory(
-                    history = animationStartHistory ?: history,
-                    enabled = animationStartPosition == null,
-                ) { ply ->
-                    val castleMove = when {
-                        ply == game.currentPly - 1 -> game.history.getOrNull(game.currentPly - 1)
-                            ?.move?.takeIf(Move::isCastle)?.let { it.copy(from = it.to, to = it.from) }
-                        ply == game.currentPly + 1 -> game.history.getOrNull(ply - 1)
-                            ?.move?.takeIf(Move::isCastle)
-                        else -> null
-                    }
-                    if (game.goTo(ply)) {
-                        if (castleMove != null) {
-                            animationStartPosition = position
-                            animationStartHistory = history
-                        }
-                        animatedMove = castleMove
-                        if (castleMove != null) moveAnimationKey++
-                        selected = null
-                        revision++
-                    }
-                }
-            }
-
             Spacer(Modifier.weight(1f))
             Text(
-                text = "点选棋子，再点目标格。棋谱会自动记录。",
+                text = "轮流操作白方和黑方，点选棋子后再点目标格。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(8.dp),
             )
@@ -268,7 +177,6 @@ fun ChessEditor() {
                 if (game.play(move)) {
                     vibrateWhenAnimationFinishes = isCapture
                     animationStartPosition = position
-                    animationStartHistory = history
                     animatedMove = move
                     moveAnimationKey++
                     selected = null
@@ -283,10 +191,8 @@ fun ChessEditor() {
 @Composable
 private fun EditorToolbar(
     position: Position,
-    setupMode: Boolean,
     enabled: Boolean,
     onFlip: () -> Unit,
-    onToggleSetup: () -> Unit,
     onNewGame: () -> Unit,
 ) {
     Row(
@@ -297,7 +203,6 @@ private fun EditorToolbar(
         Text(statusText(position), fontWeight = FontWeight.SemiBold)
         Row {
             TextButton(onClick = onFlip, enabled = enabled) { Text("翻转") }
-            TextButton(onClick = onToggleSetup, enabled = enabled) { Text(if (setupMode) "完成摆放" else "摆放棋子") }
             TextButton(onClick = onNewGame, enabled = enabled) { Text("新对局") }
         }
     }
@@ -526,59 +431,6 @@ internal fun ChessBoard(
                 visibleLastMove?.let { move ->
                     drawMoveArrow(move, UiColor(0xE6E53935), 2.5.dp.toPx())
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SetupControls(
-    selected: Piece?,
-    turn: Color,
-    onPiece: (Piece?) -> Unit,
-    onTurn: (Color) -> Unit,
-    onClear: () -> Unit,
-    onStandard: () -> Unit,
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(10.dp)) {
-            Text("选择棋子后点棋盘放置", fontWeight = FontWeight.Medium)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                item {
-                    FilterChip(selected = selected == null, onClick = { onPiece(null) }, label = { Text("擦除") })
-                }
-                val pieces = Color.entries.flatMap { color -> PieceType.entries.map { Piece(color, it) } }
-                items(pieces.size) { index ->
-                    val piece = pieces[index]
-                    FilterChip(
-                        selected = selected == piece,
-                        onClick = { onPiece(piece) },
-                        label = { Text(pieceGlyph(piece), fontSize = 24.sp) },
-                    )
-                }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("轮到：")
-                FilterChip(turn == Color.WHITE, onClick = { onTurn(Color.WHITE) }, label = { Text("白方") })
-                Spacer(Modifier.width(6.dp))
-                FilterChip(turn == Color.BLACK, onClick = { onTurn(Color.BLACK) }, label = { Text("黑方") })
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onClear) { Text("清空") }
-                TextButton(onClick = onStandard) { Text("标准布局") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MoveHistory(history: List<PlayedMove>, enabled: Boolean, onGoTo: (Int) -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Text("棋谱", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            item { AssistChip(onClick = { onGoTo(0) }, enabled = enabled, label = { Text("起始") }) }
-            itemsIndexed(history) { index, move ->
-                val label = if (index % 2 == 0) "${index / 2 + 1}. ${move.notation}" else move.notation
-                AssistChip(onClick = { onGoTo(index + 1) }, enabled = enabled, label = { Text(label) })
             }
         }
     }

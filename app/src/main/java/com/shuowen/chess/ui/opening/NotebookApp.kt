@@ -311,7 +311,7 @@ private fun DocumentList(
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Row(modifier = Modifier.align(Alignment.End)) {
                         TextButton(onClick = onOpenAppearance) { Text("外观") }
-                        TextButton(onClick = onOpenBoardTool) { Text("打开局面编辑器") }
+                        TextButton(onClick = onOpenBoardTool) { Text("模拟棋局") }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = onImport) { Text("导入棋谱") }
