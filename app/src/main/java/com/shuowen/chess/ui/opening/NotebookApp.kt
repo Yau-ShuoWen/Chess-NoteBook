@@ -1,6 +1,9 @@
 package com.shuowen.chess.ui.opening
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,11 +41,16 @@ import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
+import com.shuowen.chess.opening.ChessNoteCodec
+import com.shuowen.chess.opening.OpeningImportService
 import com.shuowen.chess.opening.OpeningRepository
+import com.shuowen.chess.opening.TextConflictPolicy
 import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
 import com.shuowen.chess.ui.editor.vibrateCapture
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun NotebookApp() {
@@ -52,6 +60,70 @@ fun NotebookApp() {
     var selectedDocument by remember { mutableStateOf<OpeningDocument?>(null) }
     var showBoardTool by remember { mutableStateOf(false) }
     var listRevision by remember { mutableIntStateOf(0) }
+    var exportContent by remember { mutableStateOf<String?>(null) }
+    var pendingImport by remember { mutableStateOf<List<OpeningDocument>?>(null) }
+
+    fun notify(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(ChessNoteCodec.MIME_TYPE),
+    ) { uri ->
+        val content = exportContent
+        exportContent = null
+        if (uri != null && content != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { it.write(content) }
+                    ?: error("无法打开保存位置")
+            }.onSuccess {
+                notify("棋谱已导出")
+            }.onFailure {
+                notify("导出失败，请重新选择保存位置")
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val source = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("无法读取文件")
+                ChessNoteCodec.decode(source)
+            }.onSuccess { imported ->
+                pendingImport = imported
+            }.onFailure { error ->
+                notify(error.message?.takeIf { it.isNotBlank() } ?: "导入失败，文件无法读取")
+            }
+        }
+    }
+
+    fun export(selected: List<OpeningDocument>, baseName: String) {
+        runCatching {
+            ChessNoteCodec.encode(selected, OffsetDateTime.now().toString(), "1.0")
+        }.onSuccess { content ->
+            exportContent = content
+            val date = OffsetDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            exportLauncher.launch("${safeFileName(baseName)}_$date${ChessNoteCodec.EXTENSION}")
+        }.onFailure { error ->
+            notify(error.message ?: "无法生成导出文件")
+        }
+    }
+
+    fun applyImport(policy: TextConflictPolicy) {
+        val imported = pendingImport ?: return
+        runCatching { OpeningImportService.apply(documents, imported, policy) }
+            .onSuccess { result ->
+                documents.clear()
+                documents.addAll(result.documents)
+                repository.save(documents)
+                listRevision++
+                pendingImport = null
+                notify(
+                    "导入完成：新增 ${result.newDocumentCount} 份，合并 ${result.mergedDocumentCount} 份，" +
+                        "加入 ${result.addedNodeCount} 个分支",
+                )
+            }.onFailure { error ->
+                notify(error.message ?: "导入失败，原有棋谱没有改变")
+            }
+    }
 
     if (showBoardTool) {
         BackHandler { showBoardTool = false }
@@ -69,6 +141,10 @@ fun NotebookApp() {
             },
             onOpen = { selectedDocument = it },
             onOpenBoardTool = { showBoardTool = true },
+            onExportAll = { export(documents.toList(), "全部棋谱") },
+            onImport = {
+                importLauncher.launch(arrayOf(ChessNoteCodec.MIME_TYPE, "application/json", "application/octet-stream"))
+            },
         )
     } else {
         OpeningEditor(
@@ -77,6 +153,7 @@ fun NotebookApp() {
                 repository.save(documents)
                 listRevision++
             },
+            onExport = { export(listOf(selectedDocument!!), selectedDocument!!.name) },
             onBack = {
                 repository.save(documents)
                 listRevision++
@@ -84,7 +161,46 @@ fun NotebookApp() {
             },
         )
     }
+
+    pendingImport?.let { imported ->
+        val preview = remember(imported, listRevision) { OpeningImportService.preview(documents, imported) }
+        AlertDialog(
+            onDismissRequest = { pendingImport = null },
+            title = { Text("导入棋谱") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("文件中有 ${preview.documentCount} 份棋谱：新增 ${preview.newDocumentCount} 份，合并 ${preview.mergedDocumentCount} 份。")
+                    if (preview.textConflictCount > 0) {
+                        Text("发现 ${preview.textConflictCount} 处文字不同。请选择发生冲突时使用哪一边的文字；走法分支都会保留。")
+                    } else {
+                        Text("导入不会删除或覆盖现有分支。")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { applyImport(TextConflictPolicy.KEEP_LOCAL) }) {
+                    Text(if (preview.textConflictCount > 0) "保留现有文字" else "确认导入")
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (preview.textConflictCount > 0) {
+                        TextButton(onClick = { applyImport(TextConflictPolicy.USE_IMPORTED) }) {
+                            Text("使用导入文字")
+                        }
+                    }
+                    TextButton(onClick = { pendingImport = null }) { Text("取消") }
+                }
+            },
+        )
+    }
 }
+
+private fun safeFileName(name: String): String = name.trim()
+    .ifBlank { "未命名开局" }
+    .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+    .replace(Regex("\\s+"), " ")
+    .take(60)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,6 +210,8 @@ private fun DocumentList(
     onCreate: () -> Unit,
     onOpen: (OpeningDocument) -> Unit,
     onOpenBoardTool: () -> Unit,
+    onExportAll: () -> Unit,
+    onImport: () -> Unit,
 ) {
     Scaffold(topBar = { TopAppBar(title = { Text("我的开局") }) }) { padding ->
         LazyColumn(
@@ -107,6 +225,10 @@ private fun DocumentList(
                     }
                     TextButton(onClick = onOpenBoardTool, modifier = Modifier.align(Alignment.End)) {
                         Text("打开局面编辑器")
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onImport) { Text("导入棋谱") }
+                        TextButton(onClick = onExportAll, enabled = documents.isNotEmpty()) { Text("导出全部") }
                     }
                 }
             }
@@ -140,7 +262,7 @@ private fun DocumentList(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack: () -> Unit) {
+private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onExport: () -> Unit, onBack: () -> Unit) {
     val tree = document.tree
     var screenRevision by remember(document.id) { mutableIntStateOf(0) }
     var treeRevision by remember(document.id) { mutableIntStateOf(0) }
@@ -194,6 +316,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 },
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
                 actions = {
+                    TextButton(onClick = onExport) { Text("导出") }
                     TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
                     TextButton(onClick = {
                         reviewMode = !reviewMode
