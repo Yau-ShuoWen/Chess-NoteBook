@@ -52,6 +52,7 @@ internal fun VariationTree(
     document: OpeningDocument,
     treeRevision: Int,
     currentNodeId: String,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
     onNode: (String) -> Unit,
     onEditNode: (String) -> Unit,
@@ -82,7 +83,7 @@ internal fun VariationTree(
 
     if (layout.size == 1) {
         Box(modifier, contentAlignment = Alignment.Center) {
-            TreeNodeCard(layout.single(), currentNodeId, setOf(tree.rootId), onNode, onEditNode)
+            TreeNodeCard(layout.single(), currentNodeId, setOf(tree.rootId), enabled, onNode, onEditNode)
         }
         return
     }
@@ -160,7 +161,7 @@ internal fun VariationTree(
                 }
             }
             layout.forEach { point ->
-                TreeNodeCard(point, currentNodeId, currentPathIds, onNode, onEditNode)
+                TreeNodeCard(point, currentNodeId, currentPathIds, enabled, onNode, onEditNode)
             }
         }
     }
@@ -172,6 +173,7 @@ private fun TreeNodeCard(
     point: TreePoint,
     currentNodeId: String,
     currentPathIds: Set<String>,
+    enabled: Boolean,
     onNode: (String) -> Unit,
     onEditNode: (String) -> Unit,
 ) {
@@ -191,6 +193,7 @@ private fun TreeNodeCard(
             .width(width.dp)
             .height(nodeHeight(point.node).dp)
             .combinedClickable(
+                enabled = enabled,
                 onClick = { onNode(point.node.id) },
                 onDoubleClick = { onEditNode(point.node.id) },
             ),

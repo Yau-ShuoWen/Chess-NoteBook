@@ -22,6 +22,10 @@ internal class BoardMoveAnimation(
     fun motionAt(square: Square, piece: Piece): PieceMotion? =
         motions.firstOrNull { it.to == square && (it.pieceType == null || it.pieceType == piece.type) }
 
+    fun startsAt(square: Square): Boolean = motions.any { it.from == square }
+
+    fun endsAt(square: Square): Boolean = motions.any { it.to == square }
+
     fun fraction(motion: PieceMotion, progress: Float): Float =
         (progress - motion.stage).coerceIn(0f, 1f)
 

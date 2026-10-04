@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
+import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
 import com.shuowen.chess.opening.OpeningNode
@@ -219,6 +220,9 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var editNode by remember { mutableStateOf(false) }
     var confirmDeleteNode by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
+    var animationStartPosition by remember { mutableStateOf<Position?>(null) }
+    var animationStartNodeId by remember { mutableStateOf<String?>(null) }
+    var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
 
@@ -247,7 +251,9 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     fun playMove(move: Move) {
         val isCapture = position.board[move.to] != null || move.isEnPassant
         if (tree.play(move)) {
-            if (isCapture) vibrateCapture(context)
+            animationStartPosition = position
+            animationStartNodeId = tree.currentNode.parentId
+            vibrateWhenAnimationFinishes = isCapture
             animatedMove = move
             moveAnimationKey++
             refresh(save = true, treeChanged = true)
@@ -272,7 +278,11 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
         }
         tree.goTo(nodeId)
         animatedMove = navigationMove
-        if (navigationMove != null) moveAnimationKey++
+        if (navigationMove != null) {
+            animationStartPosition = position
+            animationStartNodeId = currentNode.id
+            moveAnimationKey++
+        }
         refresh()
     }
 
@@ -283,24 +293,29 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     Column {
                         Text(document.name, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                         Text(
-                            statusText(position),
+                            statusText(animationStartPosition ?: position),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
-                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                navigationIcon = {
+                    TextButton(onClick = onBack, enabled = animationStartPosition == null) { Text("返回") }
+                },
                 actions = {
-                    TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
+                    TextButton(
+                        onClick = { flipped = !flipped; selected = null },
+                        enabled = animationStartPosition == null,
+                    ) { Text("翻转") }
                     TextButton(onClick = {
                         reviewMode = !reviewMode
                         selected = null
                         promotionMoves = emptyList()
                         reviewPromotionNodes = emptyList()
-                    }) {
+                    }, enabled = animationStartPosition == null) {
                         Text(if (reviewMode) "录入" else "查看")
                     }
-                    TextButton(onClick = { editMetadata = true }) { Text("信息") }
+                    TextButton(onClick = { editMetadata = true }, enabled = animationStartPosition == null) { Text("信息") }
                 },
             )
         },
@@ -316,8 +331,15 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 possibleMoves = possibleMoves,
                 lastMove = tree.currentNode.move,
                 animatedMove = animatedMove,
+                animationStartPosition = animationStartPosition,
                 moveAnimationKey = moveAnimationKey,
                 verticalPadding = 0.dp,
+                onMoveAnimationFinished = {
+                    if (vibrateWhenAnimationFinishes) vibrateCapture(context)
+                    vibrateWhenAnimationFinishes = false
+                    animationStartPosition = null
+                    animationStartNodeId = null
+                },
             ) { square ->
                 if (selected == square) {
                     selected = null
@@ -353,7 +375,8 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             if (reviewMode) {
                 ReviewNavigator(
                     tree = tree,
-                    currentNodeId = tree.currentNodeId,
+                    currentNodeId = animationStartNodeId ?: tree.currentNodeId,
+                    enabled = animationStartPosition == null,
                     branchChoices = reviewBranchChoices,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     onBranchChoicesChange = { reviewBranchChoices = it },
@@ -364,7 +387,8 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 VariationTree(
                     document = document,
                     treeRevision = treeRevision,
-                    currentNodeId = tree.currentNodeId,
+                    currentNodeId = animationStartNodeId ?: tree.currentNodeId,
+                    enabled = animationStartPosition == null,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     onNode = { id ->
                         tree.goTo(id)

@@ -95,6 +95,9 @@ fun ChessEditor() {
     var setupError by remember { mutableStateOf<String?>(null) }
     var boardFlipped by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
+    var animationStartPosition by remember { mutableStateOf<Position?>(null) }
+    var animationStartHistory by remember { mutableStateOf<List<PlayedMove>?>(null) }
+    var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
 
@@ -115,8 +118,9 @@ fun ChessEditor() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             EditorToolbar(
-                position = position,
+                position = animationStartPosition ?: position,
                 setupMode = setupMode,
+                enabled = animationStartPosition == null,
                 onFlip = {
                     boardFlipped = !boardFlipped
                     selected = null
@@ -157,7 +161,14 @@ fun ChessEditor() {
                 flipped = boardFlipped,
                 showGameStatus = !setupMode,
                 animatedMove = animatedMove,
+                animationStartPosition = animationStartPosition,
                 moveAnimationKey = moveAnimationKey,
+                onMoveAnimationFinished = {
+                    if (vibrateWhenAnimationFinishes) vibrateCapture(context)
+                    vibrateWhenAnimationFinishes = false
+                    animationStartPosition = null
+                    animationStartHistory = null
+                },
             ) { square ->
                 if (setupMode) {
                     setupBoard = setupBoard.toMutableMap().apply {
@@ -176,7 +187,9 @@ fun ChessEditor() {
                             val move = candidates.single()
                             val isCapture = position.board[move.to] != null || move.isEnPassant
                             if (game.play(move)) {
-                                if (isCapture) vibrateCapture(context)
+                                vibrateWhenAnimationFinishes = isCapture
+                                animationStartPosition = position
+                                animationStartHistory = history
                                 animatedMove = move
                                 moveAnimationKey++
                                 selected = null
@@ -212,7 +225,10 @@ fun ChessEditor() {
                     },
                 )
             } else {
-                MoveHistory(history) { ply ->
+                MoveHistory(
+                    history = animationStartHistory ?: history,
+                    enabled = animationStartPosition == null,
+                ) { ply ->
                     val castleMove = when {
                         ply == game.currentPly - 1 -> game.history.getOrNull(game.currentPly - 1)
                             ?.move?.takeIf(Move::isCastle)?.let { it.copy(from = it.to, to = it.from) }
@@ -221,6 +237,10 @@ fun ChessEditor() {
                         else -> null
                     }
                     if (game.goTo(ply)) {
+                        if (castleMove != null) {
+                            animationStartPosition = position
+                            animationStartHistory = history
+                        }
                         animatedMove = castleMove
                         if (castleMove != null) moveAnimationKey++
                         selected = null
@@ -246,7 +266,9 @@ fun ChessEditor() {
             onSelect = { move ->
                 val isCapture = position.board[move.to] != null || move.isEnPassant
                 if (game.play(move)) {
-                    if (isCapture) vibrateCapture(context)
+                    vibrateWhenAnimationFinishes = isCapture
+                    animationStartPosition = position
+                    animationStartHistory = history
                     animatedMove = move
                     moveAnimationKey++
                     selected = null
@@ -262,6 +284,7 @@ fun ChessEditor() {
 private fun EditorToolbar(
     position: Position,
     setupMode: Boolean,
+    enabled: Boolean,
     onFlip: () -> Unit,
     onToggleSetup: () -> Unit,
     onNewGame: () -> Unit,
@@ -273,9 +296,9 @@ private fun EditorToolbar(
     ) {
         Text(statusText(position), fontWeight = FontWeight.SemiBold)
         Row {
-            TextButton(onClick = onFlip) { Text("翻转") }
-            TextButton(onClick = onToggleSetup) { Text(if (setupMode) "完成摆放" else "摆放棋子") }
-            TextButton(onClick = onNewGame) { Text("新对局") }
+            TextButton(onClick = onFlip, enabled = enabled) { Text("翻转") }
+            TextButton(onClick = onToggleSetup, enabled = enabled) { Text(if (setupMode) "完成摆放" else "摆放棋子") }
+            TextButton(onClick = onNewGame, enabled = enabled) { Text("新对局") }
         }
     }
 }
@@ -291,8 +314,10 @@ internal fun ChessBoard(
     possibleMoves: List<Move> = emptyList(),
     lastMove: Move? = null,
     animatedMove: Move? = null,
+    animationStartPosition: Position? = null,
     moveAnimationKey: Int = 0,
     verticalPadding: Dp = 8.dp,
+    onMoveAnimationFinished: () -> Unit = {},
     onSquare: (Square) -> Unit,
 ) {
     val context = LocalContext.current
@@ -331,11 +356,12 @@ internal fun ChessBoard(
             moveProgress.animateTo((stage + 1).toFloat(), animationSpec = tween(durationMillis = duration))
         }
         completedMoveKey = moveAnimationKey
+        if (animation != null) onMoveAnimationFinished()
     }
     val isAnimating = animation != null && moveProgress.value < animation.endProgress
     val ranks = if (flipped) 0..7 else 7 downTo 0
     val files = if (flipped) 7 downTo 0 else 0..7
-    val checkedKing = if (showGameStatus && ChessRules.isInCheck(position, position.turn)) {
+    val checkedKing = if (!isAnimating && showGameStatus && ChessRules.isInCheck(position, position.turn)) {
         position.board.entries.firstOrNull { it.value == Piece(position.turn, PieceType.KING) }?.key
     } else {
         null
@@ -376,7 +402,7 @@ internal fun ChessBoard(
                         modifier = squareModifier
                             .zIndex(if (isAnimating) animation?.layerAt(square, moveProgress.value) ?: 0f else 0f)
                             .onSizeChanged { cellSize = it }
-                            .clickable { onSquare(square) },
+                            .clickable(enabled = !isAnimating) { onSquare(square) },
                         contentAlignment = Alignment.Center,
                     ) {
                         squareImage?.let { image ->
@@ -387,9 +413,31 @@ internal fun ChessBoard(
                                 contentScale = ContentScale.Crop,
                             )
                         }
-                        position.board[square]?.let { piece ->
+                        val oldPiece = animationStartPosition?.board?.get(square)
+                        val finalPiece = position.board[square]?.takeUnless {
+                            isAnimating && oldPiece == null && animation?.endsAt(square) != true
+                        }
+                        val capturedPiece = oldPiece?.takeIf {
+                            isAnimating && it != finalPiece && animation?.startsAt(square) != true
+                        }
+                        capturedPiece?.let { piece ->
+                            pieceImages[piece]?.let { image ->
+                                Image(
+                                    bitmap = image,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = 1.08f, scaleY = 1.08f),
+                                    contentScale = ContentScale.Fit,
+                                )
+                            } ?: Text(pieceGlyph(piece), fontSize = 34.sp)
+                        }
+                        finalPiece?.let { piece ->
                             val motion = if (isAnimating) animation?.motionAt(square, piece) else null
                             val fraction = motion?.let { animation?.fraction(it, moveProgress.value) } ?: 1f
+                            val displayedPiece = if (
+                                motion != null &&
+                                motion.pieceType != PieceType.ROOK &&
+                                animation?.move?.promotion != null
+                            ) Piece(piece.color, PieceType.PAWN) else piece
                             val fileDirection = if (flipped) -1 else 1
                             val rankDirection = if (flipped) 1 else -1
                             val pieceModifier = if (motion != null) {
@@ -402,7 +450,7 @@ internal fun ChessBoard(
                             } else {
                                 Modifier
                             }
-                            pieceImages[piece]?.let { image ->
+                            pieceImages[displayedPiece]?.let { image ->
                                 Image(
                                     bitmap = image,
                                     contentDescription = null,
@@ -411,7 +459,7 @@ internal fun ChessBoard(
                                         .graphicsLayer(scaleX = 1.08f, scaleY = 1.08f),
                                     contentScale = ContentScale.Fit,
                                 )
-                            } ?: Text(pieceGlyph(piece), fontSize = 34.sp, modifier = pieceModifier)
+                            } ?: Text(pieceGlyph(displayedPiece), fontSize = 34.sp, modifier = pieceModifier)
                         }
                         when {
                             square in legalTargets && !isCapture -> Box(
@@ -523,14 +571,14 @@ private fun SetupControls(
 }
 
 @Composable
-private fun MoveHistory(history: List<PlayedMove>, onGoTo: (Int) -> Unit) {
+private fun MoveHistory(history: List<PlayedMove>, enabled: Boolean, onGoTo: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         Text("棋谱", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            item { AssistChip(onClick = { onGoTo(0) }, label = { Text("起始") }) }
+            item { AssistChip(onClick = { onGoTo(0) }, enabled = enabled, label = { Text("起始") }) }
             itemsIndexed(history) { index, move ->
                 val label = if (index % 2 == 0) "${index / 2 + 1}. ${move.notation}" else move.notation
-                AssistChip(onClick = { onGoTo(index + 1) }, label = { Text(label) })
+                AssistChip(onClick = { onGoTo(index + 1) }, enabled = enabled, label = { Text(label) })
             }
         }
     }
