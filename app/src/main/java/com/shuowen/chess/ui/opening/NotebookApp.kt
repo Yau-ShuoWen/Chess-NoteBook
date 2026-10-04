@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,9 +40,16 @@ import androidx.compose.ui.unit.dp
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
+import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
+import com.shuowen.chess.opening.OpeningNode
 import com.shuowen.chess.opening.OpeningRepository
+import com.shuowen.chess.opening.displayName
+import com.shuowen.chess.ui.appearance.AppearancePack
+import com.shuowen.chess.ui.appearance.ChessAppearanceController
+import com.shuowen.chess.ui.appearance.LocalChessAppearance
+import com.shuowen.chess.ui.appearance.rememberChessAppearanceController
 import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
@@ -51,38 +62,50 @@ fun NotebookApp() {
     val documents = remember { repository.load() }
     var selectedDocument by remember { mutableStateOf<OpeningDocument?>(null) }
     var showBoardTool by remember { mutableStateOf(false) }
+    var showAppearance by remember { mutableStateOf(false) }
     var listRevision by remember { mutableIntStateOf(0) }
+    val appearanceController = rememberChessAppearanceController()
 
-    if (showBoardTool) {
-        BackHandler { showBoardTool = false }
-        ChessEditor()
-    } else if (selectedDocument == null) {
-        DocumentList(
-            documents = documents.toList(),
-            revision = listRevision,
-            onCreate = {
-                val document = OpeningDocument()
-                documents += document
-                repository.save(documents)
-                listRevision++
-                selectedDocument = document
-            },
-            onOpen = { selectedDocument = it },
-            onOpenBoardTool = { showBoardTool = true },
-        )
-    } else {
-        OpeningEditor(
-            document = selectedDocument!!,
-            onSave = {
-                repository.save(documents)
-                listRevision++
-            },
-            onBack = {
-                repository.save(documents)
-                listRevision++
-                selectedDocument = null
-            },
-        )
+    CompositionLocalProvider(LocalChessAppearance provides appearanceController.appearance) {
+        if (showBoardTool) {
+            BackHandler { showBoardTool = false }
+            ChessEditor()
+        } else if (selectedDocument == null) {
+            DocumentList(
+                documents = documents.toList(),
+                revision = listRevision,
+                onCreate = {
+                    val document = OpeningDocument()
+                    documents += document
+                    repository.save(documents)
+                    listRevision++
+                    selectedDocument = document
+                },
+                onOpen = { selectedDocument = it },
+                onOpenBoardTool = { showBoardTool = true },
+                onOpenAppearance = { showAppearance = true },
+            )
+        } else {
+            OpeningEditor(
+                document = selectedDocument!!,
+                onSave = {
+                    repository.save(documents)
+                    listRevision++
+                },
+                onBack = {
+                    repository.save(documents)
+                    listRevision++
+                    selectedDocument = null
+                },
+            )
+        }
+
+        if (showAppearance) {
+            AppearanceDialog(
+                controller = appearanceController,
+                onDismiss = { showAppearance = false },
+            )
+        }
     }
 }
 
@@ -94,6 +117,7 @@ private fun DocumentList(
     onCreate: () -> Unit,
     onOpen: (OpeningDocument) -> Unit,
     onOpenBoardTool: () -> Unit,
+    onOpenAppearance: () -> Unit,
 ) {
     Scaffold(topBar = { TopAppBar(title = { Text("我的开局") }) }) { padding ->
         LazyColumn(
@@ -105,8 +129,9 @@ private fun DocumentList(
                     Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
                         Text("创建空白棋谱")
                     }
-                    TextButton(onClick = onOpenBoardTool, modifier = Modifier.align(Alignment.End)) {
-                        Text("打开局面编辑器")
+                    Row(modifier = Modifier.align(Alignment.End)) {
+                        TextButton(onClick = onOpenAppearance) { Text("外观") }
+                        TextButton(onClick = onOpenBoardTool) { Text("打开局面编辑器") }
                     }
                 }
             }
@@ -138,6 +163,47 @@ private fun DocumentList(
     }
 }
 
+@Composable
+private fun AppearanceDialog(
+    controller: ChessAppearanceController,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("棋盘主题") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AppearanceOptions(
+                    packs = controller.themePacks,
+                    selectedId = controller.selectedThemeId,
+                    onSelect = controller::selectTheme,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+    )
+}
+
+@Composable
+private fun AppearanceOptions(
+    packs: List<AppearancePack>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        packs.forEach { pack ->
+            FilterChip(
+                selected = pack.id == selectedId,
+                onClick = { onSelect(pack.id) },
+                label = { Text(pack.name) },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack: () -> Unit) {
@@ -146,12 +212,17 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var treeRevision by remember(document.id) { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<Square?>(null) }
     var promotionMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
+    var reviewPromotionNodes by remember { mutableStateOf<List<OpeningNode>>(emptyList()) }
+    var reviewBranchChoices by remember(document.id) { mutableStateOf(emptyList<ReviewBranchChoice>()) }
     var flipped by remember { mutableStateOf(false) }
-    var reviewMode by remember { mutableStateOf(false) }
+    var reviewMode by remember { mutableStateOf(true) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
     var editNode by remember { mutableStateOf(false) }
     var confirmDeleteNode by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
+    var animationStartPosition by remember { mutableStateOf<Position?>(null) }
+    var animationStartNodeId by remember { mutableStateOf<String?>(null) }
+    var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
 
@@ -164,19 +235,55 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
 
     BackHandler(onBack = onBack)
     val position = remember(screenRevision) { tree.currentPosition }
+    val childNodes = tree.children()
+    val possibleMoves = childNodes.mapNotNull { it.move }
     val legalTargets = selected?.let { from ->
-        com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
+        if (reviewMode) {
+            possibleMoves.filter { it.from == from }.map { it.to }.toSet()
+        } else {
+            com.shuowen.chess.chess.ChessRules.legalMoves(position)
+                .filter { it.from == from }
+                .map { it.to }
+                .toSet()
+        }
     }.orEmpty()
-    val possibleMoves = tree.children().mapNotNull { it.move }
 
     fun playMove(move: Move) {
         val isCapture = position.board[move.to] != null || move.isEnPassant
         if (tree.play(move)) {
-            if (isCapture) vibrateCapture(context)
+            animationStartPosition = position
+            animationStartNodeId = tree.currentNode.parentId
+            vibrateWhenAnimationFinishes = isCapture
             animatedMove = move
             moveAnimationKey++
             refresh(save = true, treeChanged = true)
         }
+    }
+
+    fun navigateReview(nodeId: String, rememberBranchChoice: Boolean = false) {
+        val currentNode = tree.currentNode
+        val targetNode = tree.node(nodeId) ?: return
+        if (rememberBranchChoice && childNodes.size > 1) {
+            reviewBranchChoices = reviewBranchChoices + ReviewBranchChoice(
+                branchNodeId = currentNode.id,
+                selectedPathName = targetNode.displayName,
+            )
+        }
+        val navigationMove = when {
+            targetNode.parentId == currentNode.id -> targetNode.move
+            currentNode.parentId == targetNode.id -> currentNode.move?.let { move ->
+                move.copy(from = move.to, to = move.from)
+            }
+            else -> null
+        }
+        tree.goTo(nodeId)
+        animatedMove = navigationMove
+        if (navigationMove != null) {
+            animationStartPosition = position
+            animationStartNodeId = currentNode.id
+            moveAnimationKey++
+        }
+        refresh()
     }
 
     Scaffold(
@@ -186,26 +293,29 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     Column {
                         Text(document.name, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                         Text(
-                            statusText(position),
+                            statusText(animationStartPosition ?: position),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
-                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+                navigationIcon = {
+                    TextButton(onClick = onBack, enabled = animationStartPosition == null) { Text("返回") }
+                },
                 actions = {
-                    TextButton(onClick = { flipped = !flipped; selected = null }) { Text("翻转") }
+                    TextButton(
+                        onClick = { flipped = !flipped; selected = null },
+                        enabled = animationStartPosition == null,
+                    ) { Text("翻转") }
                     TextButton(onClick = {
                         reviewMode = !reviewMode
                         selected = null
-                        if (reviewMode) {
-                            tree.goTo(tree.rootId)
-                            refresh()
-                        }
-                    }) {
+                        promotionMoves = emptyList()
+                        reviewPromotionNodes = emptyList()
+                    }, enabled = animationStartPosition == null) {
                         Text(if (reviewMode) "录入" else "查看")
                     }
-                    TextButton(onClick = { editMetadata = true }) { Text("信息") }
+                    TextButton(onClick = { editMetadata = true }, enabled = animationStartPosition == null) { Text("信息") }
                 },
             )
         },
@@ -214,21 +324,43 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             ChessBoard(
                 position = position,
                 selected = selected,
-                legalTargets = if (reviewMode) emptySet() else legalTargets,
+                legalTargets = legalTargets,
                 forbiddenTargets = emptySet(),
                 flipped = flipped,
                 showGameStatus = true,
                 possibleMoves = possibleMoves,
                 lastMove = tree.currentNode.move,
                 animatedMove = animatedMove,
+                animationStartPosition = animationStartPosition,
                 moveAnimationKey = moveAnimationKey,
                 verticalPadding = 0.dp,
+                onMoveAnimationFinished = {
+                    if (vibrateWhenAnimationFinishes) vibrateCapture(context)
+                    vibrateWhenAnimationFinishes = false
+                    animationStartPosition = null
+                    animationStartNodeId = null
+                },
             ) { square ->
-                if (reviewMode) return@ChessBoard
                 if (selected == square) {
                     selected = null
                 } else if (selected == null) {
-                    if (position.board[square]?.color == position.turn) selected = square
+                    if (reviewMode) {
+                        if (possibleMoves.any { it.from == square }) selected = square
+                    } else if (position.board[square]?.color == position.turn) {
+                        selected = square
+                    }
+                } else if (reviewMode) {
+                    val candidates = childNodes.filter { node ->
+                        node.move?.let { it.from == selected && it.to == square } == true
+                    }
+                    when {
+                        candidates.size > 1 -> reviewPromotionNodes = candidates
+                        candidates.size == 1 -> {
+                            navigateReview(candidates.single().id, rememberBranchChoice = true)
+                        }
+                        possibleMoves.any { it.from == square } -> selected = square
+                        else -> selected = null
+                    }
                 } else {
                     val candidates = com.shuowen.chess.chess.ChessRules.legalMoves(position)
                         .filter { it.from == selected && it.to == square }
@@ -243,18 +375,20 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             if (reviewMode) {
                 ReviewNavigator(
                     tree = tree,
-                    currentNodeId = tree.currentNodeId,
+                    currentNodeId = animationStartNodeId ?: tree.currentNodeId,
+                    enabled = animationStartPosition == null,
+                    branchChoices = reviewBranchChoices,
                     modifier = Modifier.fillMaxWidth().weight(1f),
-                    onNode = { id ->
-                        tree.goTo(id)
-                        refresh()
-                    },
+                    onBranchChoicesChange = { reviewBranchChoices = it },
+                    onNode = { navigateReview(it) },
+                    onNextNode = { navigateReview(it, rememberBranchChoice = true) },
                 )
             } else {
                 VariationTree(
                     document = document,
                     treeRevision = treeRevision,
-                    currentNodeId = tree.currentNodeId,
+                    currentNodeId = animationStartNodeId ?: tree.currentNodeId,
+                    enabled = animationStartPosition == null,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     onNode = { id ->
                         tree.goTo(id)
@@ -278,6 +412,19 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             onSelect = { move ->
                 playMove(move)
                 promotionMoves = emptyList()
+            },
+        )
+    }
+    if (reviewPromotionNodes.isNotEmpty()) {
+        PromotionChoice(
+            moves = reviewPromotionNodes.mapNotNull { it.move },
+            turn = position.turn,
+            onDismiss = { reviewPromotionNodes = emptyList() },
+            onSelect = { move ->
+                reviewPromotionNodes.firstOrNull { it.move == move }?.let { nextNode ->
+                    navigateReview(nextNode.id, rememberBranchChoice = true)
+                }
+                reviewPromotionNodes = emptyList()
             },
         )
     }

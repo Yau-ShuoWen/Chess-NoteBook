@@ -30,12 +30,15 @@ import com.shuowen.chess.opening.displayName
 internal fun ReviewNavigator(
     tree: OpeningTree,
     currentNodeId: String,
+    enabled: Boolean = true,
+    branchChoices: List<ReviewBranchChoice>,
     modifier: Modifier = Modifier,
+    onBranchChoicesChange: (List<ReviewBranchChoice>) -> Unit,
     onNode: (String) -> Unit,
+    onNextNode: (String) -> Unit,
 ) {
     val currentNode = tree.node(currentNodeId) ?: return
     val children = tree.children(currentNodeId)
-    var branchChoices by remember(tree) { mutableStateOf(emptyList<BranchChoice>()) }
     var selectedNextId by remember(currentNodeId) {
         mutableStateOf(children.singleOrNull()?.id)
     }
@@ -74,6 +77,7 @@ internal fun ReviewNavigator(
                     items(children, key = { it.id }) { child ->
                         FilterChip(
                             selected = selectedNextId == child.id,
+                            enabled = enabled,
                             onClick = { selectedNextId = child.id },
                             label = { Text(child.displayName) },
                             modifier = Modifier.fillMaxWidth(),
@@ -88,10 +92,11 @@ internal fun ReviewNavigator(
             val lastChoice = branchChoices.last()
             OutlinedButton(
                 onClick = {
-                    branchChoices = branchChoices.dropLast(1)
+                    onBranchChoicesChange(branchChoices.dropLast(1))
                     onNode(lastChoice.branchNodeId)
                 },
                 modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
             ) {
                 Text("返回上次选择：${lastChoice.selectedPathName}")
             }
@@ -101,27 +106,21 @@ internal fun ReviewNavigator(
                 onClick = {
                     currentNode.parentId?.let { parentId ->
                         if (branchChoices.lastOrNull()?.branchNodeId == parentId) {
-                            branchChoices = branchChoices.dropLast(1)
+                            onBranchChoicesChange(branchChoices.dropLast(1))
                         }
                         onNode(parentId)
                     }
                 },
-                enabled = currentNode.parentId != null,
+                enabled = enabled && currentNode.parentId != null,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("上一步")
             }
             Button(
                 onClick = {
-                    selectedNextId?.let { nextId ->
-                        if (children.size > 1) {
-                            val selectedPathName = children.first { it.id == nextId }.displayName
-                            branchChoices = branchChoices + BranchChoice(currentNodeId, selectedPathName)
-                        }
-                        onNode(nextId)
-                    }
+                    selectedNextId?.let(onNextNode)
                 },
-                enabled = selectedNextId != null,
+                enabled = enabled && selectedNextId != null,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("下一步")
@@ -130,7 +129,7 @@ internal fun ReviewNavigator(
     }
 }
 
-private data class BranchChoice(
+internal data class ReviewBranchChoice(
     val branchNodeId: String,
     val selectedPathName: String,
 )
