@@ -184,7 +184,13 @@ fun NotebookApp() {
     }
 
     CompositionLocalProvider(LocalChessAppearance provides appearanceController.appearance) {
-        if (showBoardTool) {
+        if (showAppearance) {
+            BackHandler { showAppearance = false }
+            AppearanceScreen(
+                controller = appearanceController,
+                onBack = { showAppearance = false },
+            )
+        } else if (showBoardTool) {
             BackHandler { showBoardTool = false }
             ChessEditor()
         } else if (selectedDocument == null) {
@@ -229,13 +235,6 @@ fun NotebookApp() {
                     listRevision++
                     selectedDocument = null
                 },
-            )
-        }
-
-        if (showAppearance) {
-            AppearanceDialog(
-                controller = appearanceController,
-                onDismiss = { showAppearance = false },
             )
         }
 
@@ -445,28 +444,49 @@ private fun SwipeableDocumentCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppearanceDialog(
+private fun AppearanceScreen(
     controller: ChessAppearanceController,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("棋盘主题") },
-        text = {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("外观") },
+                navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            ChessBoard(
+                position = Position.initial(),
+                selected = null,
+                legalTargets = emptySet(),
+                forbiddenTargets = emptySet(),
+                flipped = false,
+                showGameStatus = false,
+                onSquare = {},
+            )
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Text("棋盘主题", style = MaterialTheme.typography.titleMedium)
                 AppearanceOptions(
                     packs = controller.themePacks,
                     selectedId = controller.selectedThemeId,
                     onSelect = controller::selectTheme,
                 )
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-    )
+        }
+    }
 }
 
 @Composable
