@@ -26,10 +26,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -295,16 +295,21 @@ private fun DocumentList(
     onDelete: (OpeningDocument) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<OpeningDocument?>(null) }
-    Scaffold(topBar = { TopAppBar(title = { Text("我的开局") }) }) { padding ->
+    var confirmCreate by remember { mutableStateOf(false) }
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("我的开局") }) },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { confirmCreate = true }) {
+                Text("+", style = MaterialTheme.typography.headlineMedium)
+            }
+        },
+    ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
-                        Text("创建空白棋谱")
-                    }
                     Row(modifier = Modifier.align(Alignment.End)) {
                         TextButton(onClick = onOpenAppearance) { Text("外观") }
                         TextButton(onClick = onOpenBoardTool) { Text("打开局面编辑器") }
@@ -333,6 +338,20 @@ private fun DocumentList(
                 )
             }
         }
+    }
+    if (confirmCreate) {
+        AlertDialog(
+            onDismissRequest = { confirmCreate = false },
+            title = { Text("创建空白棋谱？") },
+            text = { Text("确认后会创建一份空白棋谱，并直接进入编辑界面。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmCreate = false
+                    onCreate()
+                }) { Text("创建") }
+            },
+            dismissButton = { TextButton(onClick = { confirmCreate = false }) { Text("取消") } },
+        )
     }
     pendingDelete?.let { document ->
         AlertDialog(
