@@ -312,9 +312,8 @@ internal fun ChessBoard(
             .associateWith { piece -> appearance.pieces.pieceImage(context, piece) }
         if (images.values.all { it != null }) images else emptyMap()
     }
-    val moveProgress = remember(moveAnimationKey) {
-        Animatable(if (animatedMove == null) 1f else 0f)
-    }
+    val animation = remember(animatedMove) { animatedMove?.let(::boardMoveAnimation) }
+    val moveProgress = remember(moveAnimationKey) { Animatable(if (animation == null) 1f else 0f) }
     var displayedArrows by remember { mutableStateOf(possibleMoves to lastMove) }
     var completedMoveKey by remember { mutableIntStateOf(moveAnimationKey) }
     val holdArrows = animatedMove != null && moveAnimationKey != completedMoveKey
@@ -327,43 +326,13 @@ internal fun ChessBoard(
         if (!holdArrows) displayedArrows = possibleMoves to lastMove
     }
     var cellSize by remember { mutableStateOf(IntSize.Zero) }
-    val castleMove = animatedMove?.takeIf(Move::isCastle)
-    val reverseCastle = castleMove?.to?.file == 4
     LaunchedEffect(moveAnimationKey) {
-        if (castleMove != null) {
-            val firstDuration = if (reverseCastle) 180 else 280
-            val secondDuration = if (reverseCastle) 280 else 180
-            moveProgress.animateTo(1f, animationSpec = tween(durationMillis = firstDuration))
-            moveProgress.animateTo(2f, animationSpec = tween(durationMillis = secondDuration))
-        } else if (animatedMove != null) {
-            moveProgress.animateTo(1f, animationSpec = tween(durationMillis = 220))
+        animation?.stageDurations?.forEachIndexed { stage, duration ->
+            moveProgress.animateTo((stage + 1).toFloat(), animationSpec = tween(durationMillis = duration))
         }
         completedMoveKey = moveAnimationKey
     }
-    val rookMotion = castleMove?.let { move ->
-        val castleFile = if (reverseCastle) move.from.file else move.to.file
-        val rookStartFile = if (castleFile == 6) 7 else 0
-        val rookEndFile = if (castleFile == 6) 5 else 3
-        if (reverseCastle) {
-            Square(rookEndFile, move.to.rank) to Square(rookStartFile, move.to.rank)
-        } else {
-            Square(rookStartFile, move.to.rank) to Square(rookEndFile, move.to.rank)
-        }
-    }
-    val animationEnd = if (castleMove != null) 2f else 1f
-    val isAnimating = animatedMove != null && moveProgress.value < animationEnd
-    val rookStageActive = isAnimating && castleMove != null &&
-        (if (reverseCastle) moveProgress.value < 1f else moveProgress.value >= 1f)
-    val kingProgress = if (reverseCastle) {
-        (moveProgress.value - 1f).coerceIn(0f, 1f)
-    } else {
-        moveProgress.value.coerceIn(0f, 1f)
-    }
-    val rookProgress = if (reverseCastle) {
-        moveProgress.value.coerceIn(0f, 1f)
-    } else {
-        (moveProgress.value - 1f).coerceIn(0f, 1f)
-    }
+    val isAnimating = animation != null && moveProgress.value < animation.endProgress
     val ranks = if (flipped) 0..7 else 7 downTo 0
     val files = if (flipped) 7 downTo 0 else 0..7
     val checkedKing = if (showGameStatus && ChessRules.isInCheck(position, position.turn)) {
@@ -382,7 +351,7 @@ internal fun ChessBoard(
     ) {
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
-                val movingAcrossThisRow = isAnimating && animatedMove?.to?.rank == rank
+                val movingAcrossThisRow = isAnimating && animation?.move?.to?.rank == rank
                 Row(Modifier.weight(1f).zIndex(if (movingAcrossThisRow) 1f else 0f)) {
                     for (file in files) {
                     val square = Square(file, rank)
@@ -405,14 +374,7 @@ internal fun ChessBoard(
 
                     Box(
                         modifier = squareModifier
-                            .zIndex(
-                                when {
-                                    !isAnimating -> 0f
-                                    square == animatedMove?.to -> 2f
-                                    square == rookMotion?.second -> if (rookStageActive) 3f else 1f
-                                    else -> 0f
-                                },
-                            )
+                            .zIndex(if (isAnimating) animation?.layerAt(square, moveProgress.value) ?: 0f else 0f)
                             .onSizeChanged { cellSize = it }
                             .clickable { onSquare(square) },
                         contentAlignment = Alignment.Center,
@@ -426,22 +388,15 @@ internal fun ChessBoard(
                             )
                         }
                         position.board[square]?.let { piece ->
-                            val move = animatedMove
-                            val motion = when {
-                                !isAnimating -> null
-                                square == move?.to -> move.from to
-                                    (if (castleMove != null) kingProgress else moveProgress.value)
-                                rookMotion != null && square == rookMotion.second && piece.type == PieceType.ROOK ->
-                                    rookMotion.first to rookProgress
-                                else -> null
-                            }
+                            val motion = if (isAnimating) animation?.motionAt(square, piece) else null
+                            val fraction = motion?.let { animation?.fraction(it, moveProgress.value) } ?: 1f
                             val fileDirection = if (flipped) -1 else 1
                             val rankDirection = if (flipped) 1 else -1
                             val pieceModifier = if (motion != null) {
                                 Modifier.offset {
                                     IntOffset(
-                                        x = ((motion.first.file - square.file) * fileDirection * cellSize.width * (1f - motion.second)).toInt(),
-                                        y = ((motion.first.rank - square.rank) * rankDirection * cellSize.height * (1f - motion.second)).toInt(),
+                                        x = ((motion.from.file - square.file) * fileDirection * cellSize.width * (1f - fraction)).toInt(),
+                                        y = ((motion.from.rank - square.rank) * rankDirection * cellSize.height * (1f - fraction)).toInt(),
                                     )
                                 }
                             } else {
