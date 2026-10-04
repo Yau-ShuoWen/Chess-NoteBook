@@ -42,7 +42,9 @@ import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
+import com.shuowen.chess.opening.OpeningNode
 import com.shuowen.chess.opening.OpeningRepository
+import com.shuowen.chess.opening.displayName
 import com.shuowen.chess.ui.appearance.AppearancePack
 import com.shuowen.chess.ui.appearance.ChessAppearanceController
 import com.shuowen.chess.ui.appearance.LocalChessAppearance
@@ -209,8 +211,10 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var treeRevision by remember(document.id) { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf<Square?>(null) }
     var promotionMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
+    var reviewPromotionNodes by remember { mutableStateOf<List<OpeningNode>>(emptyList()) }
+    var reviewBranchChoices by remember(document.id) { mutableStateOf(emptyList<ReviewBranchChoice>()) }
     var flipped by remember { mutableStateOf(false) }
-    var reviewMode by remember { mutableStateOf(false) }
+    var reviewMode by remember { mutableStateOf(true) }
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
     var editNode by remember { mutableStateOf(false) }
     var confirmDeleteNode by remember { mutableStateOf(false) }
@@ -227,10 +231,18 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
 
     BackHandler(onBack = onBack)
     val position = remember(screenRevision) { tree.currentPosition }
+    val childNodes = tree.children()
+    val possibleMoves = childNodes.mapNotNull { it.move }
     val legalTargets = selected?.let { from ->
-        com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
+        if (reviewMode) {
+            possibleMoves.filter { it.from == from }.map { it.to }.toSet()
+        } else {
+            com.shuowen.chess.chess.ChessRules.legalMoves(position)
+                .filter { it.from == from }
+                .map { it.to }
+                .toSet()
+        }
     }.orEmpty()
-    val possibleMoves = tree.children().mapNotNull { it.move }
 
     fun playMove(move: Move) {
         val isCapture = position.board[move.to] != null || move.isEnPassant
@@ -240,6 +252,28 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             moveAnimationKey++
             refresh(save = true, treeChanged = true)
         }
+    }
+
+    fun navigateReview(nodeId: String, rememberBranchChoice: Boolean = false) {
+        val currentNode = tree.currentNode
+        val targetNode = tree.node(nodeId) ?: return
+        if (rememberBranchChoice && childNodes.size > 1) {
+            reviewBranchChoices = reviewBranchChoices + ReviewBranchChoice(
+                branchNodeId = currentNode.id,
+                selectedPathName = targetNode.displayName,
+            )
+        }
+        val navigationMove = when {
+            targetNode.parentId == currentNode.id -> targetNode.move
+            currentNode.parentId == targetNode.id -> currentNode.move?.let { move ->
+                move.copy(from = move.to, to = move.from)
+            }
+            else -> null
+        }
+        tree.goTo(nodeId)
+        animatedMove = navigationMove
+        if (navigationMove != null) moveAnimationKey++
+        refresh()
     }
 
     Scaffold(
@@ -261,10 +295,8 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                     TextButton(onClick = {
                         reviewMode = !reviewMode
                         selected = null
-                        if (reviewMode) {
-                            tree.goTo(tree.rootId)
-                            refresh()
-                        }
+                        promotionMoves = emptyList()
+                        reviewPromotionNodes = emptyList()
                     }) {
                         Text(if (reviewMode) "录入" else "查看")
                     }
@@ -277,7 +309,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             ChessBoard(
                 position = position,
                 selected = selected,
-                legalTargets = if (reviewMode) emptySet() else legalTargets,
+                legalTargets = legalTargets,
                 forbiddenTargets = emptySet(),
                 flipped = flipped,
                 showGameStatus = true,
@@ -287,11 +319,26 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 moveAnimationKey = moveAnimationKey,
                 verticalPadding = 0.dp,
             ) { square ->
-                if (reviewMode) return@ChessBoard
                 if (selected == square) {
                     selected = null
                 } else if (selected == null) {
-                    if (position.board[square]?.color == position.turn) selected = square
+                    if (reviewMode) {
+                        if (possibleMoves.any { it.from == square }) selected = square
+                    } else if (position.board[square]?.color == position.turn) {
+                        selected = square
+                    }
+                } else if (reviewMode) {
+                    val candidates = childNodes.filter { node ->
+                        node.move?.let { it.from == selected && it.to == square } == true
+                    }
+                    when {
+                        candidates.size > 1 -> reviewPromotionNodes = candidates
+                        candidates.size == 1 -> {
+                            navigateReview(candidates.single().id, rememberBranchChoice = true)
+                        }
+                        possibleMoves.any { it.from == square } -> selected = square
+                        else -> selected = null
+                    }
                 } else {
                     val candidates = com.shuowen.chess.chess.ChessRules.legalMoves(position)
                         .filter { it.from == selected && it.to == square }
@@ -307,11 +354,11 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 ReviewNavigator(
                     tree = tree,
                     currentNodeId = tree.currentNodeId,
+                    branchChoices = reviewBranchChoices,
                     modifier = Modifier.fillMaxWidth().weight(1f),
-                    onNode = { id ->
-                        tree.goTo(id)
-                        refresh()
-                    },
+                    onBranchChoicesChange = { reviewBranchChoices = it },
+                    onNode = { navigateReview(it) },
+                    onNextNode = { navigateReview(it, rememberBranchChoice = true) },
                 )
             } else {
                 VariationTree(
@@ -341,6 +388,19 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             onSelect = { move ->
                 playMove(move)
                 promotionMoves = emptyList()
+            },
+        )
+    }
+    if (reviewPromotionNodes.isNotEmpty()) {
+        PromotionChoice(
+            moves = reviewPromotionNodes.mapNotNull { it.move },
+            turn = position.turn,
+            onDismiss = { reviewPromotionNodes = emptyList() },
+            onSelect = { move ->
+                reviewPromotionNodes.firstOrNull { it.move == move }?.let { nextNode ->
+                    navigateReview(nextNode.id, rememberBranchChoice = true)
+                }
+                reviewPromotionNodes = emptyList()
             },
         )
     }
