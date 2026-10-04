@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -212,9 +213,19 @@ fun ChessEditor() {
                 )
             } else {
                 MoveHistory(history) { ply ->
-                    game.goTo(ply)
-                    selected = null
-                    revision++
+                    val castleMove = when {
+                        ply == game.currentPly - 1 -> game.history.getOrNull(game.currentPly - 1)
+                            ?.move?.takeIf(Move::isCastle)?.let { it.copy(from = it.to, to = it.from) }
+                        ply == game.currentPly + 1 -> game.history.getOrNull(ply - 1)
+                            ?.move?.takeIf(Move::isCastle)
+                        else -> null
+                    }
+                    if (game.goTo(ply)) {
+                        animatedMove = castleMove
+                        if (castleMove != null) moveAnimationKey++
+                        selected = null
+                        revision++
+                    }
                 }
             }
 
@@ -301,13 +312,57 @@ internal fun ChessBoard(
             .associateWith { piece -> appearance.pieces.pieceImage(context, piece) }
         if (images.values.all { it != null }) images else emptyMap()
     }
-    val moveProgress = remember { Animatable(1f) }
+    val moveProgress = remember(moveAnimationKey) {
+        Animatable(if (animatedMove == null) 1f else 0f)
+    }
+    var displayedArrows by remember { mutableStateOf(possibleMoves to lastMove) }
+    var completedMoveKey by remember { mutableIntStateOf(moveAnimationKey) }
+    val holdArrows = animatedMove != null && moveAnimationKey != completedMoveKey
+    val (visiblePossibleMoves, visibleLastMove) = if (holdArrows) {
+        displayedArrows
+    } else {
+        possibleMoves to lastMove
+    }
+    SideEffect {
+        if (!holdArrows) displayedArrows = possibleMoves to lastMove
+    }
     var cellSize by remember { mutableStateOf(IntSize.Zero) }
+    val castleMove = animatedMove?.takeIf(Move::isCastle)
+    val reverseCastle = castleMove?.to?.file == 4
     LaunchedEffect(moveAnimationKey) {
-        if (animatedMove != null) {
-            moveProgress.snapTo(0f)
+        if (castleMove != null) {
+            val firstDuration = if (reverseCastle) 180 else 280
+            val secondDuration = if (reverseCastle) 280 else 180
+            moveProgress.animateTo(1f, animationSpec = tween(durationMillis = firstDuration))
+            moveProgress.animateTo(2f, animationSpec = tween(durationMillis = secondDuration))
+        } else if (animatedMove != null) {
             moveProgress.animateTo(1f, animationSpec = tween(durationMillis = 220))
         }
+        completedMoveKey = moveAnimationKey
+    }
+    val rookMotion = castleMove?.let { move ->
+        val castleFile = if (reverseCastle) move.from.file else move.to.file
+        val rookStartFile = if (castleFile == 6) 7 else 0
+        val rookEndFile = if (castleFile == 6) 5 else 3
+        if (reverseCastle) {
+            Square(rookEndFile, move.to.rank) to Square(rookStartFile, move.to.rank)
+        } else {
+            Square(rookStartFile, move.to.rank) to Square(rookEndFile, move.to.rank)
+        }
+    }
+    val animationEnd = if (castleMove != null) 2f else 1f
+    val isAnimating = animatedMove != null && moveProgress.value < animationEnd
+    val rookStageActive = isAnimating && castleMove != null &&
+        (if (reverseCastle) moveProgress.value < 1f else moveProgress.value >= 1f)
+    val kingProgress = if (reverseCastle) {
+        (moveProgress.value - 1f).coerceIn(0f, 1f)
+    } else {
+        moveProgress.value.coerceIn(0f, 1f)
+    }
+    val rookProgress = if (reverseCastle) {
+        moveProgress.value.coerceIn(0f, 1f)
+    } else {
+        (moveProgress.value - 1f).coerceIn(0f, 1f)
     }
     val ranks = if (flipped) 0..7 else 7 downTo 0
     val files = if (flipped) 7 downTo 0 else 0..7
@@ -327,7 +382,7 @@ internal fun ChessBoard(
     ) {
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
-                val movingAcrossThisRow = animatedMove?.to?.rank == rank && moveProgress.value < 1f
+                val movingAcrossThisRow = isAnimating && animatedMove?.to?.rank == rank
                 Row(Modifier.weight(1f).zIndex(if (movingAcrossThisRow) 1f else 0f)) {
                     for (file in files) {
                     val square = Square(file, rank)
@@ -350,7 +405,14 @@ internal fun ChessBoard(
 
                     Box(
                         modifier = squareModifier
-                            .zIndex(if (square == animatedMove?.to && moveProgress.value < 1f) 1f else 0f)
+                            .zIndex(
+                                when {
+                                    !isAnimating -> 0f
+                                    square == animatedMove?.to -> 2f
+                                    square == rookMotion?.second -> if (rookStageActive) 3f else 1f
+                                    else -> 0f
+                                },
+                            )
                             .onSizeChanged { cellSize = it }
                             .clickable { onSquare(square) },
                         contentAlignment = Alignment.Center,
@@ -365,14 +427,21 @@ internal fun ChessBoard(
                         }
                         position.board[square]?.let { piece ->
                             val move = animatedMove
-                            val isMovingPiece = move != null && square == move.to && moveProgress.value < 1f
+                            val motion = when {
+                                !isAnimating -> null
+                                square == move?.to -> move.from to
+                                    (if (castleMove != null) kingProgress else moveProgress.value)
+                                rookMotion != null && square == rookMotion.second && piece.type == PieceType.ROOK ->
+                                    rookMotion.first to rookProgress
+                                else -> null
+                            }
                             val fileDirection = if (flipped) -1 else 1
                             val rankDirection = if (flipped) 1 else -1
-                            val pieceModifier = if (isMovingPiece) {
+                            val pieceModifier = if (motion != null) {
                                 Modifier.offset {
                                     IntOffset(
-                                        x = ((move!!.from.file - move.to.file) * fileDirection * cellSize.width * (1f - moveProgress.value)).toInt(),
-                                        y = ((move.from.rank - move.to.rank) * rankDirection * cellSize.height * (1f - moveProgress.value)).toInt(),
+                                        x = ((motion.first.file - square.file) * fileDirection * cellSize.width * (1f - motion.second)).toInt(),
+                                        y = ((motion.first.rank - square.rank) * rankDirection * cellSize.height * (1f - motion.second)).toInt(),
                                     )
                                 }
                             } else {
@@ -417,7 +486,7 @@ internal fun ChessBoard(
                 }
             }
         }
-        if (possibleMoves.isNotEmpty() || lastMove != null) {
+        if (visiblePossibleMoves.isNotEmpty() || visibleLastMove != null) {
             Canvas(Modifier.matchParentSize()) {
                 fun center(square: Square): Offset {
                     val shownFile = if (flipped) 7 - square.file else square.file
@@ -448,10 +517,10 @@ internal fun ChessBoard(
                     drawLine(color, end, right, strokeWidth = stroke, cap = StrokeCap.Round)
                 }
 
-                possibleMoves.forEach { move ->
+                visiblePossibleMoves.forEach { move ->
                     drawMoveArrow(move, UiColor(0xE600A86B), 2.5.dp.toPx())
                 }
-                lastMove?.let { move ->
+                visibleLastMove?.let { move ->
                     drawMoveArrow(move, UiColor(0xE6E53935), 2.5.dp.toPx())
                 }
             }
