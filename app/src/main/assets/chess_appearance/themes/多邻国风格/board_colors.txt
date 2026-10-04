@@ -1,0 +1,2 @@
+light=#FFFFFF
+dark=#F2F4F5
