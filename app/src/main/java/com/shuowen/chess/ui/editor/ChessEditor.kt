@@ -363,9 +363,6 @@ internal fun ChessBoard(
                                 contentScale = ContentScale.Crop,
                             )
                         }
-                        if (hasCustomBoard && square == selected) {
-                            Box(Modifier.matchParentSize().background(UiColor(0x99E5C65C)))
-                        }
                         position.board[square]?.let { piece ->
                             val move = animatedMove
                             val isMovingPiece = move != null && square == move.to && moveProgress.value < 1f
@@ -403,15 +400,17 @@ internal fun ChessBoard(
                                 fontWeight = FontWeight.Bold,
                             )
                         }
-                        if (hasCustomBoard && isCapture) {
-                            Box(Modifier.matchParentSize().background(UiColor(0x22000000)))
+                        val squareOverlay = when {
+                            square == checkedKing && checkmated -> UiColor(0x55B71C1C)
+                            hasCustomBoard && isCapture -> UiColor(0x22000000)
+                            hasCustomBoard && square == selected -> UiColor(0x4DE5C65C)
+                            else -> null
                         }
-                        if (square == checkedKing) {
-                            if (checkmated) {
-                                Box(Modifier.matchParentSize().background(UiColor(0x55B71C1C)))
-                            } else {
-                                Box(Modifier.matchParentSize().border(1.dp, UiColor(0xFFD32F2F)))
-                            }
+                        squareOverlay?.let { color ->
+                            Box(Modifier.matchParentSize().background(color))
+                        }
+                        if (square == checkedKing && !checkmated) {
+                            Box(Modifier.matchParentSize().border(1.dp, UiColor(0xFFD32F2F)))
                         }
                     }
                     }
