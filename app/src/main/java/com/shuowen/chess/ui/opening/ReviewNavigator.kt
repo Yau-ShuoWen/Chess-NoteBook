@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ internal fun ReviewNavigator(
 ) {
     val currentNode = tree.node(currentNodeId) ?: return
     val children = tree.children(currentNodeId)
+    var branchChoices by remember(tree) { mutableStateOf(emptyList<BranchChoice>()) }
     var selectedNextId by remember(currentNodeId) {
         mutableStateOf(children.singleOrNull()?.id)
     }
@@ -82,16 +84,43 @@ internal fun ReviewNavigator(
         }
 
         if (children.size <= 1) Spacer(Modifier.weight(1f))
+        if (branchChoices.isNotEmpty()) {
+            val lastChoice = branchChoices.last()
+            OutlinedButton(
+                onClick = {
+                    branchChoices = branchChoices.dropLast(1)
+                    onNode(lastChoice.branchNodeId)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("返回上次选择：${lastChoice.selectedPathName}")
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(
-                onClick = { currentNode.parentId?.let(onNode) },
+                onClick = {
+                    currentNode.parentId?.let { parentId ->
+                        if (branchChoices.lastOrNull()?.branchNodeId == parentId) {
+                            branchChoices = branchChoices.dropLast(1)
+                        }
+                        onNode(parentId)
+                    }
+                },
                 enabled = currentNode.parentId != null,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("上一步")
             }
             Button(
-                onClick = { selectedNextId?.let(onNode) },
+                onClick = {
+                    selectedNextId?.let { nextId ->
+                        if (children.size > 1) {
+                            val selectedPathName = children.first { it.id == nextId }.displayName
+                            branchChoices = branchChoices + BranchChoice(currentNodeId, selectedPathName)
+                        }
+                        onNode(nextId)
+                    }
+                },
                 enabled = selectedNextId != null,
                 modifier = Modifier.weight(1f),
             ) {
@@ -100,3 +129,8 @@ internal fun ReviewNavigator(
         }
     }
 }
+
+private data class BranchChoice(
+    val branchNodeId: String,
+    val selectedPathName: String,
+)
