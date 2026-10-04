@@ -7,6 +7,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
@@ -51,7 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as UiColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,6 +72,10 @@ import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.PlayedMove
 import com.shuowen.chess.chess.Position
 import com.shuowen.chess.chess.Square
+import com.shuowen.chess.ui.appearance.LocalChessAppearance
+import com.shuowen.chess.ui.appearance.boardColor
+import com.shuowen.chess.ui.appearance.boardImage
+import com.shuowen.chess.ui.appearance.pieceImage
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -277,6 +284,23 @@ internal fun ChessBoard(
     verticalPadding: Dp = 8.dp,
     onSquare: (Square) -> Unit,
 ) {
+    val context = LocalContext.current
+    val appearance = LocalChessAppearance.current
+    val boardImages = remember(appearance.board.id) {
+        val light = appearance.board.boardImage(context, light = true)
+        val dark = appearance.board.boardImage(context, light = false)
+        if (light != null && dark != null) light to dark else null
+    }
+    val boardColors = remember(appearance.board.id) {
+        val light = appearance.board.boardColor(light = true)
+        val dark = appearance.board.boardColor(light = false)
+        if (light != null && dark != null) light to dark else null
+    }
+    val pieceImages = remember(appearance.pieces.id) {
+        val images = Color.entries.flatMap { color -> PieceType.entries.map { type -> Piece(color, type) } }
+            .associateWith { piece -> appearance.pieces.pieceImage(context, piece) }
+        if (images.values.all { it != null }) images else emptyMap()
+    }
     val moveProgress = remember { Animatable(1f) }
     var cellSize by remember { mutableStateOf(IntSize.Zero) }
     LaunchedEffect(moveAnimationKey) {
@@ -294,7 +318,13 @@ internal fun ChessBoard(
     }
     val checkmated = checkedKing != null && ChessRules.isCheckmate(position)
 
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = verticalPadding)) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .padding(vertical = verticalPadding)
+            .border(1.dp, UiColor(0xFFD5D8DA)),
+    ) {
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
                 val movingAcrossThisRow = animatedMove?.to?.rank == rank && moveProgress.value < 1f
@@ -313,10 +343,10 @@ internal fun ChessBoard(
                         isLightSquare -> UiColor(0xFFC3A77E)
                         else -> UiColor(0xFF815D45)
                     }
-                    var squareModifier = Modifier.weight(1f).fillMaxHeight().background(displayColor)
-                    if (square == checkedKing) {
-                        squareModifier = squareModifier.border(3.dp, UiColor(0xFFD32F2F))
-                    }
+                    val squareImage = boardImages?.let { (light, dark) -> if (isLightSquare) light else dark }
+                    val squareColor = boardColors?.let { (light, dark) -> if (isLightSquare) light else dark }
+                    val hasCustomBoard = squareImage != null || squareColor != null
+                    val squareModifier = Modifier.weight(1f).fillMaxHeight().background(squareColor ?: displayColor)
 
                     Box(
                         modifier = squareModifier
@@ -325,6 +355,17 @@ internal fun ChessBoard(
                             .clickable { onSquare(square) },
                         contentAlignment = Alignment.Center,
                     ) {
+                        squareImage?.let { image ->
+                            Image(
+                                bitmap = image,
+                                contentDescription = null,
+                                modifier = Modifier.matchParentSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                        if (hasCustomBoard && square == selected) {
+                            Box(Modifier.matchParentSize().background(UiColor(0x99E5C65C)))
+                        }
                         position.board[square]?.let { piece ->
                             val move = animatedMove
                             val isMovingPiece = move != null && square == move.to && moveProgress.value < 1f
@@ -340,15 +381,18 @@ internal fun ChessBoard(
                             } else {
                                 Modifier
                             }
-                            Text(pieceGlyph(piece), fontSize = 34.sp, modifier = pieceModifier)
+                            pieceImages[piece]?.let { image ->
+                                Image(
+                                    bitmap = image,
+                                    contentDescription = null,
+                                    modifier = pieceModifier
+                                        .fillMaxSize()
+                                        .graphicsLayer(scaleX = 1.08f, scaleY = 1.08f),
+                                    contentScale = ContentScale.Fit,
+                                )
+                            } ?: Text(pieceGlyph(piece), fontSize = 34.sp, modifier = pieceModifier)
                         }
                         when {
-                            square == checkedKing && checkmated -> Text(
-                                text = "×",
-                                color = UiColor(0xFFD32F2F),
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
                             square in legalTargets && !isCapture -> Box(
                                 Modifier.size(12.dp).background(UiColor(0x99606060), CircleShape),
                             )
@@ -358,6 +402,16 @@ internal fun ChessBoard(
                                 fontSize = 30.sp,
                                 fontWeight = FontWeight.Bold,
                             )
+                        }
+                        if (hasCustomBoard && isCapture) {
+                            Box(Modifier.matchParentSize().background(UiColor(0x22000000)))
+                        }
+                        if (square == checkedKing) {
+                            if (checkmated) {
+                                Box(Modifier.matchParentSize().background(UiColor(0x55B71C1C)))
+                            } else {
+                                Box(Modifier.matchParentSize().border(1.dp, UiColor(0xFFD32F2F)))
+                            }
                         }
                     }
                     }

@@ -9,12 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +43,10 @@ import com.shuowen.chess.chess.PieceType
 import com.shuowen.chess.chess.Square
 import com.shuowen.chess.opening.OpeningDocument
 import com.shuowen.chess.opening.OpeningRepository
+import com.shuowen.chess.ui.appearance.AppearancePack
+import com.shuowen.chess.ui.appearance.ChessAppearanceController
+import com.shuowen.chess.ui.appearance.LocalChessAppearance
+import com.shuowen.chess.ui.appearance.rememberChessAppearanceController
 import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
@@ -51,38 +59,50 @@ fun NotebookApp() {
     val documents = remember { repository.load() }
     var selectedDocument by remember { mutableStateOf<OpeningDocument?>(null) }
     var showBoardTool by remember { mutableStateOf(false) }
+    var showAppearance by remember { mutableStateOf(false) }
     var listRevision by remember { mutableIntStateOf(0) }
+    val appearanceController = rememberChessAppearanceController()
 
-    if (showBoardTool) {
-        BackHandler { showBoardTool = false }
-        ChessEditor()
-    } else if (selectedDocument == null) {
-        DocumentList(
-            documents = documents.toList(),
-            revision = listRevision,
-            onCreate = {
-                val document = OpeningDocument()
-                documents += document
-                repository.save(documents)
-                listRevision++
-                selectedDocument = document
-            },
-            onOpen = { selectedDocument = it },
-            onOpenBoardTool = { showBoardTool = true },
-        )
-    } else {
-        OpeningEditor(
-            document = selectedDocument!!,
-            onSave = {
-                repository.save(documents)
-                listRevision++
-            },
-            onBack = {
-                repository.save(documents)
-                listRevision++
-                selectedDocument = null
-            },
-        )
+    CompositionLocalProvider(LocalChessAppearance provides appearanceController.appearance) {
+        if (showBoardTool) {
+            BackHandler { showBoardTool = false }
+            ChessEditor()
+        } else if (selectedDocument == null) {
+            DocumentList(
+                documents = documents.toList(),
+                revision = listRevision,
+                onCreate = {
+                    val document = OpeningDocument()
+                    documents += document
+                    repository.save(documents)
+                    listRevision++
+                    selectedDocument = document
+                },
+                onOpen = { selectedDocument = it },
+                onOpenBoardTool = { showBoardTool = true },
+                onOpenAppearance = { showAppearance = true },
+            )
+        } else {
+            OpeningEditor(
+                document = selectedDocument!!,
+                onSave = {
+                    repository.save(documents)
+                    listRevision++
+                },
+                onBack = {
+                    repository.save(documents)
+                    listRevision++
+                    selectedDocument = null
+                },
+            )
+        }
+
+        if (showAppearance) {
+            AppearanceDialog(
+                controller = appearanceController,
+                onDismiss = { showAppearance = false },
+            )
+        }
     }
 }
 
@@ -94,6 +114,7 @@ private fun DocumentList(
     onCreate: () -> Unit,
     onOpen: (OpeningDocument) -> Unit,
     onOpenBoardTool: () -> Unit,
+    onOpenAppearance: () -> Unit,
 ) {
     Scaffold(topBar = { TopAppBar(title = { Text("我的开局") }) }) { padding ->
         LazyColumn(
@@ -105,8 +126,9 @@ private fun DocumentList(
                     Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
                         Text("创建空白棋谱")
                     }
-                    TextButton(onClick = onOpenBoardTool, modifier = Modifier.align(Alignment.End)) {
-                        Text("打开局面编辑器")
+                    Row(modifier = Modifier.align(Alignment.End)) {
+                        TextButton(onClick = onOpenAppearance) { Text("外观") }
+                        TextButton(onClick = onOpenBoardTool) { Text("打开局面编辑器") }
                     }
                 }
             }
@@ -134,6 +156,47 @@ private fun DocumentList(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AppearanceDialog(
+    controller: ChessAppearanceController,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("棋盘主题") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AppearanceOptions(
+                    packs = controller.themePacks,
+                    selectedId = controller.selectedThemeId,
+                    onSelect = controller::selectTheme,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+    )
+}
+
+@Composable
+private fun AppearanceOptions(
+    packs: List<AppearancePack>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        packs.forEach { pack ->
+            FilterChip(
+                selected = pack.id == selectedId,
+                onClick = { onSelect(pack.id) },
+                label = { Text(pack.name) },
+            )
         }
     }
 }
