@@ -1,5 +1,12 @@
 package com.shuowen.chess.ui.editor
 
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
@@ -14,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,10 +51,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as UiColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.shuowen.chess.chess.ChessGame
 import com.shuowen.chess.chess.ChessRules
 import com.shuowen.chess.chess.Color
@@ -72,6 +86,9 @@ fun ChessEditor() {
     var setupTurn by remember { mutableStateOf(Color.WHITE) }
     var setupError by remember { mutableStateOf<String?>(null) }
     var boardFlipped by remember { mutableStateOf(false) }
+    var animatedMove by remember { mutableStateOf<Move?>(null) }
+    var moveAnimationKey by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
     val position = remember(revision) { game.position }
     val legalTargets = selected?.let { game.legalMoves(it).map(Move::to).toSet() }.orEmpty()
@@ -131,6 +148,8 @@ fun ChessEditor() {
                 forbiddenTargets = if (setupMode) emptySet() else forbiddenTargets,
                 flipped = boardFlipped,
                 showGameStatus = !setupMode,
+                animatedMove = animatedMove,
+                moveAnimationKey = moveAnimationKey,
             ) { square ->
                 if (setupMode) {
                     setupBoard = setupBoard.toMutableMap().apply {
@@ -146,9 +165,15 @@ fun ChessEditor() {
                     when {
                         candidates.size > 1 -> promotionMoves = candidates
                         candidates.size == 1 -> {
-                            game.play(candidates.single())
-                            selected = null
-                            revision++
+                            val move = candidates.single()
+                            val isCapture = position.board[move.to] != null || move.isEnPassant
+                            if (game.play(move)) {
+                                if (isCapture) vibrateCapture(context)
+                                animatedMove = move
+                                moveAnimationKey++
+                                selected = null
+                                revision++
+                            }
                         }
                         position.board[square]?.color == position.turn -> selected = square
                         else -> selected = null
@@ -201,10 +226,15 @@ fun ChessEditor() {
             turn = position.turn,
             onDismiss = { promotionMoves = emptyList() },
             onSelect = { move ->
-                game.play(move)
-                selected = null
-                promotionMoves = emptyList()
-                revision++
+                val isCapture = position.board[move.to] != null || move.isEnPassant
+                if (game.play(move)) {
+                    if (isCapture) vibrateCapture(context)
+                    animatedMove = move
+                    moveAnimationKey++
+                    selected = null
+                    promotionMoves = emptyList()
+                    revision++
+                }
             },
         )
     }
@@ -242,9 +272,19 @@ internal fun ChessBoard(
     showGameStatus: Boolean,
     possibleMoves: List<Move> = emptyList(),
     lastMove: Move? = null,
+    animatedMove: Move? = null,
+    moveAnimationKey: Int = 0,
     verticalPadding: Dp = 8.dp,
     onSquare: (Square) -> Unit,
 ) {
+    val moveProgress = remember { Animatable(1f) }
+    var cellSize by remember { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(moveAnimationKey) {
+        if (animatedMove != null) {
+            moveProgress.snapTo(0f)
+            moveProgress.animateTo(1f, animationSpec = tween(durationMillis = 220))
+        }
+    }
     val ranks = if (flipped) 0..7 else 7 downTo 0
     val files = if (flipped) 7 downTo 0 else 0..7
     val checkedKing = if (showGameStatus && ChessRules.isInCheck(position, position.turn)) {
@@ -257,7 +297,8 @@ internal fun ChessBoard(
     Box(Modifier.fillMaxWidth().aspectRatio(1f).padding(vertical = verticalPadding)) {
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
-                Row(Modifier.weight(1f)) {
+                val movingAcrossThisRow = animatedMove?.to?.rank == rank && moveProgress.value < 1f
+                Row(Modifier.weight(1f).zIndex(if (movingAcrossThisRow) 1f else 0f)) {
                     for (file in files) {
                     val square = Square(file, rank)
                     val isLightSquare = (file + rank) % 2 == 0
@@ -278,10 +319,29 @@ internal fun ChessBoard(
                     }
 
                     Box(
-                        modifier = squareModifier.clickable { onSquare(square) },
+                        modifier = squareModifier
+                            .zIndex(if (square == animatedMove?.to && moveProgress.value < 1f) 1f else 0f)
+                            .onSizeChanged { cellSize = it }
+                            .clickable { onSquare(square) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        position.board[square]?.let { Text(pieceGlyph(it), fontSize = 34.sp) }
+                        position.board[square]?.let { piece ->
+                            val move = animatedMove
+                            val isMovingPiece = move != null && square == move.to && moveProgress.value < 1f
+                            val fileDirection = if (flipped) -1 else 1
+                            val rankDirection = if (flipped) 1 else -1
+                            val pieceModifier = if (isMovingPiece) {
+                                Modifier.offset {
+                                    IntOffset(
+                                        x = ((move!!.from.file - move.to.file) * fileDirection * cellSize.width * (1f - moveProgress.value)).toInt(),
+                                        y = ((move.from.rank - move.to.rank) * rankDirection * cellSize.height * (1f - moveProgress.value)).toInt(),
+                                    )
+                                }
+                            } else {
+                                Modifier
+                            }
+                            Text(pieceGlyph(piece), fontSize = 34.sp, modifier = pieceModifier)
+                        }
                         when {
                             square == checkedKing && checkmated -> Text(
                                 text = "×",
@@ -446,4 +506,16 @@ internal fun pieceGlyph(piece: Piece): String = when (piece.color to piece.type)
     Color.BLACK to PieceType.KNIGHT -> "♞"
     Color.BLACK to PieceType.PAWN -> "♟"
     else -> ""
+}
+
+internal fun vibrateCapture(context: Context) {
+    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    }
+    vibrator?.takeIf { it.hasVibrator() }?.vibrate(
+        VibrationEffect.createOneShot(60L, VibrationEffect.DEFAULT_AMPLITUDE),
+    )
 }

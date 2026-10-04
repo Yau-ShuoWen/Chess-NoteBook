@@ -42,6 +42,7 @@ import com.shuowen.chess.opening.OpeningRepository
 import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
+import com.shuowen.chess.ui.editor.vibrateCapture
 
 @Composable
 fun NotebookApp() {
@@ -150,6 +151,9 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
     var editMetadata by remember { mutableStateOf(document.name == "未命名开局" && document.description.isBlank()) }
     var editNode by remember { mutableStateOf(false) }
     var confirmDeleteNode by remember { mutableStateOf(false) }
+    var animatedMove by remember { mutableStateOf<Move?>(null) }
+    var moveAnimationKey by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
     fun refresh(save: Boolean = false, treeChanged: Boolean = false) {
         selected = null
@@ -164,6 +168,16 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
         com.shuowen.chess.chess.ChessRules.legalMoves(position).filter { it.from == from }.map { it.to }.toSet()
     }.orEmpty()
     val possibleMoves = tree.children().mapNotNull { it.move }
+
+    fun playMove(move: Move) {
+        val isCapture = position.board[move.to] != null || move.isEnPassant
+        if (tree.play(move)) {
+            if (isCapture) vibrateCapture(context)
+            animatedMove = move
+            moveAnimationKey++
+            refresh(save = true, treeChanged = true)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -206,6 +220,8 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                 showGameStatus = true,
                 possibleMoves = possibleMoves,
                 lastMove = tree.currentNode.move,
+                animatedMove = animatedMove,
+                moveAnimationKey = moveAnimationKey,
                 verticalPadding = 0.dp,
             ) { square ->
                 if (reviewMode) return@ChessBoard
@@ -218,9 +234,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
                         .filter { it.from == selected && it.to == square }
                     when {
                         candidates.size > 1 -> promotionMoves = candidates
-                        candidates.size == 1 -> if (tree.play(candidates.single())) {
-                            refresh(save = true, treeChanged = true)
-                        }
+                        candidates.size == 1 -> playMove(candidates.single())
                         position.board[square]?.color == position.turn -> selected = square
                         else -> selected = null
                     }
@@ -262,7 +276,7 @@ private fun OpeningEditor(document: OpeningDocument, onSave: () -> Unit, onBack:
             turn = position.turn,
             onDismiss = { promotionMoves = emptyList() },
             onSelect = { move ->
-                if (tree.play(move)) refresh(save = true, treeChanged = true)
+                playMove(move)
                 promotionMoves = emptyList()
             },
         )
