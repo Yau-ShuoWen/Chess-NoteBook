@@ -1,17 +1,26 @@
 package com.shuowen.chess.ui.opening
 
+import android.content.ClipData
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +31,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -30,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,9 +49,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.shuowen.chess.chess.Move
 import com.shuowen.chess.chess.Piece
 import com.shuowen.chess.chess.PieceType
@@ -60,8 +78,11 @@ import com.shuowen.chess.ui.editor.ChessBoard
 import com.shuowen.chess.ui.editor.ChessEditor
 import com.shuowen.chess.ui.editor.statusText
 import com.shuowen.chess.ui.editor.vibrateCapture
+import com.shuowen.chess.R
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 @Composable
 fun NotebookApp() {
@@ -138,6 +159,30 @@ fun NotebookApp() {
             }
     }
 
+    fun share(document: OpeningDocument) {
+        runCatching {
+            val content = ChessNoteCodec.encode(listOf(document), OffsetDateTime.now().toString(), "1.0")
+            val directory = java.io.File(context.cacheDir, "shared_chess_notes").apply { mkdirs() }
+            val file = java.io.File(
+                directory,
+                "${safeFileName(document.name)}_${System.currentTimeMillis()}${ChessNoteCodec.EXTENSION}",
+            ).apply { writeText(content, Charsets.UTF_8) }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = ChessNoteCodec.MIME_TYPE
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, document.name)
+                clipData = ClipData.newUri(context.contentResolver, document.name, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(
+                Intent.createChooser(send, "分享“${document.name}”").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            notify("分享失败，请稍后重试")
+        }
+    }
+
     CompositionLocalProvider(LocalChessAppearance provides appearanceController.appearance) {
         if (showBoardTool) {
             BackHandler { showBoardTool = false }
@@ -161,6 +206,14 @@ fun NotebookApp() {
                     importLauncher.launch(
                         arrayOf(ChessNoteCodec.MIME_TYPE, "application/json", "application/octet-stream"),
                     )
+                },
+                onShare = { share(it) },
+                onDelete = { document ->
+                    if (document.tree.size == 1 && document.tree.children(document.tree.rootId).isEmpty()) {
+                        documents.removeAll { it.id == document.id }
+                        repository.save(documents)
+                        listRevision++
+                    }
                 },
             )
         } else {
@@ -238,7 +291,10 @@ private fun DocumentList(
     onOpenAppearance: () -> Unit,
     onExportAll: () -> Unit,
     onImport: () -> Unit,
+    onShare: (OpeningDocument) -> Unit,
+    onDelete: (OpeningDocument) -> Unit,
 ) {
+    var pendingDelete by remember { mutableStateOf<OpeningDocument?>(null) }
     Scaffold(topBar = { TopAppBar(title = { Text("我的开局") }) }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
@@ -269,19 +325,102 @@ private fun DocumentList(
                 }
             }
             items(documents, key = { "${it.id}-$revision" }) { document ->
-                Card(Modifier.fillMaxWidth().clickable { onOpen(document) }) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(document.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        if (document.description.isNotBlank()) {
-                            Text(document.description, modifier = Modifier.padding(top = 5.dp))
-                        }
-                        Text(
-                            "${document.tree.size - 1} 步记录 · ${document.tree.children(document.tree.rootId).size} 个起始分支",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
+                SwipeableDocumentCard(
+                    document = document,
+                    onOpen = { onOpen(document) },
+                    onDelete = { pendingDelete = document },
+                    onShare = { onShare(document) },
+                )
+            }
+        }
+    }
+    pendingDelete?.let { document ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除空棋谱？") },
+            text = { Text("“${document.name}”还没有走法记录。删除后无法撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDelete = null
+                    onDelete(document)
+                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun SwipeableDocumentCard(
+    document: OpeningDocument,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    onShare: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val actionWidth = 76.dp
+    val actionWidthPx = with(density) { actionWidth.toPx() }
+    val offset = remember(document.id) { Animatable(0f) }
+    val canDelete = document.tree.size == 1 && document.tree.children(document.tree.rootId).isEmpty()
+
+    Box(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)) {
+        Row(
+            modifier = Modifier.matchParentSize().background(
+                if (canDelete) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+            ),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = {
+                    scope.launch { offset.animateTo(0f, tween(180)) }
+                    if (canDelete) onDelete() else onShare()
+                },
+                modifier = Modifier.width(actionWidth),
+            ) {
+                Icon(
+                    painter = painterResource(if (canDelete) R.drawable.ic_delete else R.drawable.ic_share),
+                    contentDescription = if (canDelete) "删除空棋谱" else "分享棋谱",
+                    tint = if (canDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Card(
+            Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offset.value.roundToInt(), 0) }
+                .pointerInput(document.id, actionWidthPx) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            scope.launch {
+                                offset.snapTo((offset.value + dragAmount).coerceIn(-actionWidthPx, 0f))
+                            }
+                        },
+                        onDragEnd = {
+                            scope.launch {
+                                val target = if (offset.value <= -actionWidthPx * 0.35f) -actionWidthPx else 0f
+                                offset.animateTo(target, tween(180))
+                            }
+                        },
+                        onDragCancel = { scope.launch { offset.animateTo(0f, tween(180)) } },
+                    )
                 }
+                .clickable {
+                    if (offset.value < 0f) scope.launch { offset.animateTo(0f, tween(180)) } else onOpen()
+                },
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text(document.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (document.description.isNotBlank()) {
+                    Text(document.description, modifier = Modifier.padding(top = 5.dp))
+                }
+                Text(
+                    "${document.tree.size - 1} 步记录 · ${document.tree.children(document.tree.rootId).size} 个起始分支",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         }
     }
