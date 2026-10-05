@@ -34,6 +34,7 @@ data class AppearancePack(
     val name: String,
     val files: Map<String, String> = emptyMap(),
     val boardColors: Map<String, String> = emptyMap(),
+    val usesIntersectionGrid: Boolean = false,
     val isClassic: Boolean = false,
 )
 
@@ -79,7 +80,8 @@ class ChessAppearanceController internal constructor(context: Context) {
         return runCatching { appContext.assets.list(themesPath).orEmpty() }.getOrDefault(emptyArray()).mapNotNull { packId ->
             if (packId == CLASSIC_ID) return@mapNotNull null
             val packPath = "$themesPath/$packId"
-            val files = runCatching { appContext.assets.list(packPath).orEmpty() }.getOrDefault(emptyArray())
+            val assetNames = runCatching { appContext.assets.list(packPath).orEmpty() }.getOrDefault(emptyArray())
+            val files = assetNames
                 .filter { file -> file.substringAfterLast('.', "").lowercase() in imageExtensions }
                 .associateBy { file -> file.substringBeforeLast('.').lowercase() }
             val boardColors = readBoardColors("$packPath/board_colors.txt")
@@ -91,6 +93,7 @@ class ChessAppearanceController internal constructor(context: Context) {
                 name = packId.replace('_', ' '),
                 files = files.mapValues { (_, file) -> "$packPath/$file" },
                 boardColors = boardColors,
+                usesIntersectionGrid = "grid_intersections.txt" in assetNames,
             )
         }.sortedBy(AppearancePack::name)
     }

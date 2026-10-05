@@ -318,6 +318,20 @@ internal fun ChessBoard(
                                 contentScale = ContentScale.Crop,
                             )
                         }
+                        if (appearance.board.usesIntersectionGrid) {
+                            val shownFile = if (flipped) 7 - square.file else square.file
+                            val shownRank = if (flipped) square.rank else 7 - square.rank
+                            Canvas(Modifier.matchParentSize()) {
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val lineColor = UiColor(0xCC3F291B)
+                                val stroke = 1.dp.toPx()
+                                if (shownFile > 0) drawLine(lineColor, center, Offset(0f, center.y), stroke)
+                                if (shownFile < 7) drawLine(lineColor, center, Offset(size.width, center.y), stroke)
+                                if (shownRank > 0) drawLine(lineColor, center, Offset(center.x, 0f), stroke)
+                                if (shownRank < 7) drawLine(lineColor, center, Offset(center.x, size.height), stroke)
+                            }
+                        }
+                        val pieceScale = if (appearance.pieces.usesIntersectionGrid) 0.88f else 1.08f
                         val oldPiece = animationStartPosition?.board?.get(square)
                         val finalPiece = position.board[square]?.takeUnless {
                             isAnimating && oldPiece == null && animation?.endsAt(square) != true
@@ -330,7 +344,7 @@ internal fun ChessBoard(
                                 Image(
                                     bitmap = image,
                                     contentDescription = null,
-                                    modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = 1.08f, scaleY = 1.08f),
+                                    modifier = Modifier.fillMaxSize().graphicsLayer(scaleX = pieceScale, scaleY = pieceScale),
                                     contentScale = ContentScale.Fit,
                                 )
                             } ?: Text(pieceGlyph(piece), fontSize = 34.sp)
@@ -361,7 +375,7 @@ internal fun ChessBoard(
                                     contentDescription = null,
                                     modifier = pieceModifier
                                         .fillMaxSize()
-                                        .graphicsLayer(scaleX = 1.08f, scaleY = 1.08f),
+                                        .graphicsLayer(scaleX = pieceScale, scaleY = pieceScale),
                                     contentScale = ContentScale.Fit,
                                 )
                             } ?: Text(pieceGlyph(displayedPiece), fontSize = 34.sp, modifier = pieceModifier)
