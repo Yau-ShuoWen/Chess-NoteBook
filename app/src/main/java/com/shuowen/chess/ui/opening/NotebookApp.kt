@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -48,6 +49,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,6 +97,7 @@ fun NotebookApp() {
     var listRevision by remember { mutableIntStateOf(0) }
     var exportContent by remember { mutableStateOf<String?>(null) }
     var pendingImport by remember { mutableStateOf<List<OpeningDocument>?>(null) }
+    var selectedImports by remember { mutableStateOf<Set<String>>(emptySet()) }
     val appearanceController = rememberChessAppearanceController()
 
     fun notify(message: String) = Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -123,6 +126,7 @@ fun NotebookApp() {
                 ChessNoteCodec.decode(source)
             }.onSuccess { imported ->
                 pendingImport = imported
+                selectedImports = imported.map { it.id }.toSet()
             }.onFailure { error ->
                 notify(error.message?.takeIf { it.isNotBlank() } ?: "导入失败，文件无法读取")
             }
@@ -142,7 +146,7 @@ fun NotebookApp() {
     }
 
     fun applyImport(policy: TextConflictPolicy) {
-        val imported = pendingImport ?: return
+        val imported = pendingImport?.filter { it.id in selectedImports } ?: return
         runCatching { OpeningImportService.apply(documents, imported, policy) }
             .onSuccess { result ->
                 documents.clear()
@@ -197,8 +201,8 @@ fun NotebookApp() {
             DocumentList(
                 documents = documents.toList(),
                 revision = listRevision,
-                onCreate = {
-                    val document = OpeningDocument()
+                onCreate = { name, description ->
+                    val document = OpeningDocument(name = name.ifBlank { "未命名开局" }, description = description)
                     documents += document
                     repository.save(documents)
                     listRevision++
@@ -207,7 +211,7 @@ fun NotebookApp() {
                 onOpen = { selectedDocument = it },
                 onOpenBoardTool = { showBoardTool = true },
                 onOpenAppearance = { showAppearance = true },
-                onExportAll = { export(documents.toList(), "全部棋谱") },
+                onExportSelected = { selected -> export(selected, if (selected.size == 1) selected.first().name else "棋谱") },
                 onImport = {
                     importLauncher.launch(
                         arrayOf(ChessNoteCodec.MIME_TYPE, "application/json", "application/octet-stream"),
@@ -239,13 +243,27 @@ fun NotebookApp() {
         }
 
         pendingImport?.let { imported ->
-            val preview = remember(imported, listRevision) { OpeningImportService.preview(documents, imported) }
+            val chosen = imported.filter { it.id in selectedImports }
+            val preview = remember(imported, selectedImports, listRevision) { OpeningImportService.preview(documents, chosen) }
             AlertDialog(
                 onDismissRequest = { pendingImport = null },
                 title = { Text("导入棋谱") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("文件中有 ${preview.documentCount} 份棋谱：新增 ${preview.newDocumentCount} 份，合并 ${preview.mergedDocumentCount} 份。")
+                        Text("选择要导入的棋谱：")
+                        if (imported.size > 1) {
+                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                imported.forEach { document ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = document.id in selectedImports, onCheckedChange = { checked ->
+                                            selectedImports = if (checked) selectedImports + document.id else selectedImports - document.id
+                                        })
+                                        Text(document.name)
+                                    }
+                                }
+                            }
+                        } else Text(imported.first().name)
+                        Text("选中 ${preview.documentCount} 份：新增 ${preview.newDocumentCount} 份，合并 ${preview.mergedDocumentCount} 份。")
                         if (preview.textConflictCount > 0) {
                             Text("发现 ${preview.textConflictCount} 处文字不同。请选择发生冲突时使用哪一边的文字；走法分支都会保留。")
                         } else {
@@ -254,7 +272,7 @@ fun NotebookApp() {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { applyImport(TextConflictPolicy.KEEP_LOCAL) }) {
+                    TextButton(onClick = { applyImport(TextConflictPolicy.KEEP_LOCAL) }, enabled = chosen.isNotEmpty()) {
                         Text(if (preview.textConflictCount > 0) "保留现有文字" else "确认导入")
                     }
                 },
@@ -279,24 +297,37 @@ private fun safeFileName(name: String): String = name.trim()
     .replace(Regex("\\s+"), " ")
     .take(60)
 
+@Composable
+private fun HomeAction(label: String, icon: Int, enabled: Boolean = true, onClick: () -> Unit) {
+    TextButton(onClick = onClick, enabled = enabled) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(painterResource(icon), contentDescription = null)
+            Text(label)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DocumentList(
     documents: List<OpeningDocument>,
     revision: Int,
-    onCreate: () -> Unit,
+    onCreate: (String, String) -> Unit,
     onOpen: (OpeningDocument) -> Unit,
     onOpenBoardTool: () -> Unit,
     onOpenAppearance: () -> Unit,
-    onExportAll: () -> Unit,
+    onExportSelected: (List<OpeningDocument>) -> Unit,
     onImport: () -> Unit,
     onShare: (OpeningDocument) -> Unit,
     onDelete: (OpeningDocument) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<OpeningDocument?>(null) }
     var confirmCreate by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
+    var exportIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var newName by remember { mutableStateOf("") }
+    var newDescription by remember { mutableStateOf("") }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("我的开局") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { confirmCreate = true }) {
                 Text("+", style = MaterialTheme.typography.headlineMedium)
@@ -309,13 +340,14 @@ private fun DocumentList(
         ) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Row(modifier = Modifier.align(Alignment.End)) {
-                        TextButton(onClick = onOpenAppearance) { Text("外观") }
-                        TextButton(onClick = onOpenBoardTool) { Text("模拟棋局") }
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onImport) { Text("导入棋谱") }
-                        TextButton(onClick = onExportAll, enabled = documents.isNotEmpty()) { Text("导出全部") }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        HomeAction("外观", R.drawable.ic_theme, onClick = onOpenAppearance)
+                        HomeAction("导入", R.drawable.ic_import, onClick = onImport)
+                        HomeAction("导出", R.drawable.ic_export, enabled = documents.isNotEmpty()) {
+                            exportIds = documents.map { it.id }.toSet()
+                            showExport = true
+                        }
+                        HomeAction("模拟棋局", R.drawable.ic_board, onClick = onOpenBoardTool)
                     }
                 }
             }
@@ -341,17 +373,42 @@ private fun DocumentList(
     if (confirmCreate) {
         AlertDialog(
             onDismissRequest = { confirmCreate = false },
-            title = { Text("创建空白棋谱？") },
-            text = { Text("确认后会创建一份空白棋谱，并直接进入编辑界面。") },
+            title = { Text("新建棋谱") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(newName, { newName = it }, label = { Text("名称") }, singleLine = true)
+                OutlinedTextField(newDescription, { newDescription = it }, label = { Text("内容") }, minLines = 3)
+            } },
             confirmButton = {
                 TextButton(onClick = {
                     confirmCreate = false
-                    onCreate()
-                }) { Text("创建") }
+                    onCreate(newName.trim(), newDescription.trim())
+                    newName = ""
+                    newDescription = ""
+                }) { Icon(painterResource(R.drawable.ic_check), contentDescription = "确定") }
             },
-            dismissButton = { TextButton(onClick = { confirmCreate = false }) { Text("取消") } },
+            dismissButton = { Row {
+                TextButton(onClick = { confirmCreate = false; onImport() }) { Icon(painterResource(R.drawable.ic_import), contentDescription = null); Text("导入") }
+                TextButton(onClick = { confirmCreate = false }) { Icon(painterResource(R.drawable.ic_close), contentDescription = "取消") }
+            } },
         )
     }
+    if (showExport) AlertDialog(
+        onDismissRequest = { showExport = false },
+        title = { Text("导出棋谱") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            documents.forEach { document -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(document.id in exportIds, onCheckedChange = { checked ->
+                    exportIds = if (checked) exportIds + document.id else exportIds - document.id
+                })
+                Text(document.name)
+            } }
+        } },
+        confirmButton = { TextButton(onClick = {
+            showExport = false
+            onExportSelected(documents.filter { it.id in exportIds })
+        }, enabled = exportIds.isNotEmpty()) { Text("导出") } },
+        dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } },
+    )
     pendingDelete?.let { document ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -528,9 +585,12 @@ private fun OpeningEditor(
     var confirmDeleteNode by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
     var animationStartPosition by remember { mutableStateOf<Position?>(null) }
+    var dragReleaseOffset by remember { mutableStateOf<Offset?>(null) }
     var animationStartNodeId by remember { mutableStateOf<String?>(null) }
     var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
+    var pendingNavigation by remember { mutableStateOf<List<String>>(emptyList()) }
+    var fastNavigation by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     fun refresh(save: Boolean = false, treeChanged: Boolean = false) {
@@ -567,30 +627,46 @@ private fun OpeningEditor(
         }
     }
 
+    fun advanceNavigation() {
+        val nextId = pendingNavigation.firstOrNull() ?: return
+        pendingNavigation = pendingNavigation.drop(1)
+        val currentNode = tree.currentNode
+        val targetNode = tree.node(nextId) ?: return
+        val startPosition = tree.currentPosition
+        val navigationMove = when {
+            targetNode.parentId == currentNode.id -> targetNode.move
+            currentNode.parentId == targetNode.id -> currentNode.move?.let { it.copy(from = it.to, to = it.from) }
+            else -> null
+        }
+        tree.goTo(nextId)
+        animatedMove = navigationMove
+        if (navigationMove != null) {
+            animationStartPosition = startPosition
+            animationStartNodeId = currentNode.id
+            moveAnimationKey++
+        }
+        refresh()
+    }
+
     fun navigateReview(nodeId: String, rememberBranchChoice: Boolean = false) {
+        if (animationStartPosition != null) return
         val currentNode = tree.currentNode
         val targetNode = tree.node(nodeId) ?: return
+        if (targetNode.id == currentNode.id) return
         if (rememberBranchChoice && childNodes.size > 1) {
             reviewBranchChoices = reviewBranchChoices + ReviewBranchChoice(
                 branchNodeId = currentNode.id,
                 selectedPathName = targetNode.displayName,
             )
         }
-        val navigationMove = when {
-            targetNode.parentId == currentNode.id -> targetNode.move
-            currentNode.parentId == targetNode.id -> currentNode.move?.let { move ->
-                move.copy(from = move.to, to = move.from)
-            }
-            else -> null
-        }
-        tree.goTo(nodeId)
-        animatedMove = navigationMove
-        if (navigationMove != null) {
-            animationStartPosition = position
-            animationStartNodeId = currentNode.id
-            moveAnimationKey++
-        }
-        refresh()
+        val fromPath = listOf(tree.node(tree.rootId)!!) + tree.pathTo(currentNode.id)
+        val toPath = listOf(tree.node(tree.rootId)!!) + tree.pathTo(targetNode.id)
+        val common = fromPath.zip(toPath).takeWhile { (a, b) -> a.id == b.id }.size
+        val retreat = fromPath.drop(common).asReversed().mapNotNull { it.parentId }
+        val forward = toPath.drop(common).map { it.id }
+        pendingNavigation = retreat + forward
+        fastNavigation = pendingNavigation.size > 1
+        advanceNavigation()
     }
 
     Scaffold(
@@ -640,13 +716,46 @@ private fun OpeningEditor(
                 lastMove = tree.currentNode.move,
                 animatedMove = animatedMove,
                 animationStartPosition = animationStartPosition,
+                animationStartOffset = dragReleaseOffset,
                 moveAnimationKey = moveAnimationKey,
+                animationDurationMillis = if (fastNavigation) 90 else if (dragReleaseOffset != null) 140 else null,
+                onDragStart = { square ->
+                    selected = square.takeIf { from ->
+                        if (reviewMode) possibleMoves.any { it.from == from }
+                        else position.board[from]?.color == position.turn
+                    }
+                },
+                onDragFinished = { selected = null },
+                onDrop = { from, to, releaseOffset ->
+                    if (reviewMode) {
+                        val candidates = childNodes.filter { node -> node.move?.let { it.from == from && it.to == to } == true }
+                        when (candidates.size) {
+                            1 -> {
+                                dragReleaseOffset = releaseOffset
+                                navigateReview(candidates.single().id, rememberBranchChoice = true)
+                            }
+                            in 2..Int.MAX_VALUE -> reviewPromotionNodes = candidates
+                        }
+                    } else {
+                        val candidates = com.shuowen.chess.chess.ChessRules.legalMoves(position)
+                            .filter { it.from == from && it.to == to }
+                        when (candidates.size) {
+                            1 -> {
+                                dragReleaseOffset = releaseOffset
+                                playMove(candidates.single())
+                            }
+                            in 2..Int.MAX_VALUE -> promotionMoves = candidates
+                        }
+                    }
+                },
                 verticalPadding = 0.dp,
                 onMoveAnimationFinished = {
                     if (vibrateWhenAnimationFinishes) vibrateCapture(context)
                     vibrateWhenAnimationFinishes = false
                     animationStartPosition = null
+                    dragReleaseOffset = null
                     animationStartNodeId = null
+                    if (pendingNavigation.isNotEmpty()) advanceNavigation() else fastNavigation = false
                 },
             ) { square ->
                 if (selected == square) {
@@ -699,8 +808,7 @@ private fun OpeningEditor(
                     enabled = animationStartPosition == null,
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     onNode = { id ->
-                        tree.goTo(id)
-                        refresh()
+                        navigateReview(id)
                     },
                     onEditNode = { id ->
                         tree.goTo(id)
