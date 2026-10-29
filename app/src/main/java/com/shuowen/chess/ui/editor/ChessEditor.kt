@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,6 +74,7 @@ import com.shuowen.chess.ui.appearance.pieceImage
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,6 +86,7 @@ fun ChessEditor() {
     var boardFlipped by remember { mutableStateOf(false) }
     var animatedMove by remember { mutableStateOf<Move?>(null) }
     var animationStartPosition by remember { mutableStateOf<Position?>(null) }
+    var dragReleaseOffset by remember { mutableStateOf<Offset?>(null) }
     var vibrateWhenAnimationFinishes by remember { mutableStateOf(false) }
     var moveAnimationKey by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
@@ -125,11 +129,37 @@ fun ChessEditor() {
                 showGameStatus = true,
                 animatedMove = animatedMove,
                 animationStartPosition = animationStartPosition,
+                animationStartOffset = dragReleaseOffset,
+                animationDurationMillis = if (dragReleaseOffset != null) 140 else null,
                 moveAnimationKey = moveAnimationKey,
+                onDragStart = { square ->
+                    selected = square.takeIf { position.board[it]?.color == position.turn }
+                },
+                onDragFinished = { selected = null },
+                onDrop = { from, to, releaseOffset ->
+                    val candidates = game.legalMoves(from).filter { it.to == to }
+                    when (candidates.size) {
+                        1 -> {
+                            val move = candidates.single()
+                            val isCapture = position.board[to] != null || move.isEnPassant
+                            if (game.play(move)) {
+                                dragReleaseOffset = releaseOffset
+                                vibrateWhenAnimationFinishes = isCapture
+                                animationStartPosition = position
+                                animatedMove = move
+                                moveAnimationKey++
+                                selected = null
+                                revision++
+                            }
+                        }
+                        in 2..Int.MAX_VALUE -> promotionMoves = candidates
+                    }
+                },
                 onMoveAnimationFinished = {
                     if (vibrateWhenAnimationFinishes) vibrateCapture(context)
                     vibrateWhenAnimationFinishes = false
                     animationStartPosition = null
+                    dragReleaseOffset = null
                 },
             ) { square ->
                 if (selected == square) {
@@ -220,7 +250,12 @@ internal fun ChessBoard(
     lastMove: Move? = null,
     animatedMove: Move? = null,
     animationStartPosition: Position? = null,
+    animationStartOffset: Offset? = null,
     moveAnimationKey: Int = 0,
+    animationDurationMillis: Int? = null,
+    onDragStart: (Square) -> Unit = {},
+    onDragFinished: () -> Unit = {},
+    onDrop: ((Square, Square, Offset) -> Unit)? = null,
     verticalPadding: Dp = 8.dp,
     onMoveAnimationFinished: () -> Unit = {},
     onSquare: (Square) -> Unit,
@@ -256,9 +291,11 @@ internal fun ChessBoard(
         if (!holdArrows) displayedArrows = possibleMoves to lastMove
     }
     var cellSize by remember { mutableStateOf(IntSize.Zero) }
+    var draggedSquare by remember { mutableStateOf<Square?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
     LaunchedEffect(moveAnimationKey) {
         animation?.stageDurations?.forEachIndexed { stage, duration ->
-            moveProgress.animateTo((stage + 1).toFloat(), animationSpec = tween(durationMillis = duration))
+            moveProgress.animateTo((stage + 1).toFloat(), animationSpec = tween(durationMillis = animationDurationMillis ?: duration))
         }
         completedMoveKey = moveAnimationKey
         if (animation != null) onMoveAnimationFinished()
@@ -283,7 +320,7 @@ internal fun ChessBoard(
         Column(Modifier.fillMaxSize()) {
             for (rank in ranks) {
                 val movingAcrossThisRow = isAnimating && animation?.move?.to?.rank == rank
-                Row(Modifier.weight(1f).zIndex(if (movingAcrossThisRow) 1f else 0f)) {
+                Row(Modifier.weight(1f).zIndex(if (draggedSquare?.rank == rank) 10f else if (movingAcrossThisRow) 1f else 0f)) {
                     for (file in files) {
                     val square = Square(file, rank)
                     val isLightSquare = (file + rank) % 2 == 0
@@ -301,16 +338,50 @@ internal fun ChessBoard(
                     val squareImage = boardImages?.let { (light, dark) -> if (isLightSquare) light else dark }
                     val squareColor = boardColors?.let { (light, dark) -> if (isLightSquare) light else dark }
                     val hasCustomBoard = squareImage != null || squareColor != null
-                    val squareModifier = Modifier.weight(1f).fillMaxHeight().background(squareColor ?: displayColor)
+                    val highlightAsBackground = hasCustomBoard && (square == selected || square == draggedSquare)
+                    val squareModifier = Modifier.weight(1f).fillMaxHeight().background(
+                        if (highlightAsBackground) UiColor(0xFFE5C65C) else squareColor ?: displayColor,
+                    )
 
                     Box(
                         modifier = squareModifier
-                            .zIndex(if (isAnimating) animation?.layerAt(square, moveProgress.value) ?: 0f else 0f)
+                            .zIndex(if (draggedSquare == square) 10f else if (isAnimating) animation?.layerAt(square, moveProgress.value) ?: 0f else 0f)
                             .onSizeChanged { cellSize = it }
-                            .clickable(enabled = !isAnimating) { onSquare(square) },
+                            .then(if (onDrop != null && position.board[square] != null && !isAnimating) Modifier.pointerInput(square, flipped, cellSize) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        draggedSquare = square
+                                        dragOffset = Offset.Zero
+                                        onDragStart(square)
+                                    },
+                                    onDragEnd = {
+                                        val dx = (dragOffset.x / cellSize.width).roundToInt()
+                                        val dy = (dragOffset.y / cellSize.height).roundToInt()
+                                        val targetFile = square.file + dx * if (flipped) -1 else 1
+                                        val targetRank = square.rank + dy * if (flipped) 1 else -1
+                                        if (targetFile in 0..7 && targetRank in 0..7 && (targetFile != square.file || targetRank != square.rank)) {
+                                            onDrop(square, Square(targetFile, targetRank), dragOffset)
+                                        }
+                                        draggedSquare = null
+                                        dragOffset = Offset.Zero
+                                        onDragFinished()
+                                    },
+                                    onDragCancel = {
+                                        draggedSquare = null
+                                        dragOffset = Offset.Zero
+                                        onDragFinished()
+                                    },
+                                    onDrag = { change, amount -> change.consume(); dragOffset += amount },
+                                )
+                            } else Modifier)
+                            .clickable(
+                                interactionSource = remember(square) { MutableInteractionSource() },
+                                indication = null,
+                                enabled = !isAnimating,
+                            ) { onSquare(square) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        squareImage?.let { image ->
+                        squareImage?.takeUnless { highlightAsBackground }?.let { image ->
                             Image(
                                 bitmap = image,
                                 contentDescription = null,
@@ -359,11 +430,14 @@ internal fun ChessBoard(
                             ) Piece(piece.color, PieceType.PAWN) else piece
                             val fileDirection = if (flipped) -1 else 1
                             val rankDirection = if (flipped) 1 else -1
-                            val pieceModifier = if (motion != null) {
+                            val pieceModifier = if (draggedSquare == square) {
+                                Modifier.offset { IntOffset(dragOffset.x.toInt(), dragOffset.y.toInt()) }
+                            } else if (motion != null) {
+                                val releaseOffset = animationStartOffset?.takeUnless { motion.pieceType == PieceType.ROOK } ?: Offset.Zero
                                 Modifier.offset {
                                     IntOffset(
-                                        x = ((motion.from.file - square.file) * fileDirection * cellSize.width * (1f - fraction)).toInt(),
-                                        y = ((motion.from.rank - square.rank) * rankDirection * cellSize.height * (1f - fraction)).toInt(),
+                                        x = (((motion.from.file - square.file) * fileDirection * cellSize.width + releaseOffset.x) * (1f - fraction)).toInt(),
+                                        y = (((motion.from.rank - square.rank) * rankDirection * cellSize.height + releaseOffset.y) * (1f - fraction)).toInt(),
                                     )
                                 }
                             } else {
@@ -375,10 +449,17 @@ internal fun ChessBoard(
                                     contentDescription = null,
                                     modifier = pieceModifier
                                         .fillMaxSize()
-                                        .graphicsLayer(scaleX = pieceScale, scaleY = pieceScale),
+                                        .graphicsLayer(scaleX = pieceScale * if (draggedSquare == square) 1.15f else 1f, scaleY = pieceScale * if (draggedSquare == square) 1.15f else 1f),
                                     contentScale = ContentScale.Fit,
                                 )
-                            } ?: Text(pieceGlyph(displayedPiece), fontSize = 34.sp, modifier = pieceModifier)
+                            } ?: Text(
+                                pieceGlyph(displayedPiece),
+                                fontSize = 34.sp,
+                                modifier = pieceModifier.graphicsLayer(
+                                    scaleX = if (draggedSquare == square) 1.15f else 1f,
+                                    scaleY = if (draggedSquare == square) 1.15f else 1f,
+                                ),
+                            )
                         }
                         when {
                             square in legalTargets && !isCapture -> Box(
@@ -393,12 +474,14 @@ internal fun ChessBoard(
                         }
                         val squareOverlay = when {
                             square == checkedKing && checkmated -> UiColor(0x55B71C1C)
-                            hasCustomBoard && isCapture -> UiColor(0x22000000)
-                            hasCustomBoard && square == selected -> UiColor(0x4DE5C65C)
+                            hasCustomBoard && isCapture -> UiColor(0x33E5C65C)
                             else -> null
                         }
                         squareOverlay?.let { color ->
                             Box(Modifier.matchParentSize().background(color))
+                        }
+                        if (isCapture) {
+                            Box(Modifier.matchParentSize().border(2.dp, UiColor(0xFFE5C65C)))
                         }
                         if (square == checkedKing && !checkmated) {
                             Box(Modifier.matchParentSize().border(1.dp, UiColor(0xFFD32F2F)))
